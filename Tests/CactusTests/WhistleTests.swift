@@ -35,9 +35,10 @@ final class SpeechProbe: @unchecked Sendable {
 
     var api: NativeAPI {
         var api = text.api
-        api.setAudio = { value in self.lock.withLock { self.settings.append(value) } }
+        var cactus = CactusFunctions.unused
+        cactus.setAudio = { value in self.lock.withLock { self.settings.append(value) } }
         api.lastError = { self.options.last?.language == "en" ? "audio diagnostic" : "cleared" }
-        api.transcribe = { pcm, _, output in
+        cactus.transcribe = { pcm, _, output in
             #expect(pcm.baseAddress != nil)
             self.lock.withLock { self.sizes.append(output.count) }
             return self.write(
@@ -48,7 +49,7 @@ final class SpeechProbe: @unchecked Sendable {
                 to: output
             )
         }
-        api.streamProcess = { pcm, options, output in
+        cactus.streamProcess = { pcm, options, output in
             let first = pcm.first.map { "\($0)" } ?? "-"
             let keywords = options.keywords.joined(separator: ",")
             self.lock.withLock {
@@ -62,14 +63,14 @@ final class SpeechProbe: @unchecked Sendable {
                 to: output
             )
         }
-        api.streamStop = { output in
+        cactus.streamStop = { output in
             self.lock.withLock { self.events.append("stop/\(output.count)") }
             return self.write(
                 #"{"text":"there","words":[],"pending":"","language":"en","received":2,"pass_ms":3}"#,
                 to: output
             )
         }
-        api.completeAudio = { pcm, tokens, output in
+        cactus.completeAudio = { pcm, tokens, output in
             #expect(pcm.baseAddress != nil)
             #expect(tokens == 512)
             return self.write(
@@ -80,6 +81,7 @@ final class SpeechProbe: @unchecked Sendable {
                 to: output
             )
         }
+        api.cactus = cactus
         return api
     }
 
@@ -270,25 +272,25 @@ func speechCABIArguments() throws {
             #expect(language == nil && keywords == nil)
         }
     }
-    var symbols = nativeSymbols(modern: true)
-    symbols["needle_transcribe"] = address(transcribe)
-    symbols["needle_set_audio"] = address(setAudio)
-    symbols["needle_complete"] = address(complete)
-    let api = try NativeAPI.bind { symbols[$0] }
+    var symbols = nativeSymbols(generation: 3)
+    symbols["cactus_transcribe"] = address(transcribe)
+    symbols["cactus_set_audio"] = address(setAudio)
+    symbols["cactus_complete"] = address(complete)
+    let api = try #require(NativeAPI.bind(generation: 3) { symbols[$0] }.cactus)
     let options = AudioOptions(language: "en", keywords: ["Paris", "Ada"], wordTimestamps: true)
-    api.setAudio?(options)
+    api.setAudio(options)
     var buffer = [CChar](repeating: 0, count: 32)
     [Float(0.25), -0.5].withUnsafeBufferPointer { pcm in
-        #expect(buffer.withUnsafeMutableBufferPointer { api.transcribe?(pcm, options, $0) } == 7)
+        #expect(buffer.withUnsafeMutableBufferPointer { api.transcribe(pcm, options, $0) } == 7)
         #expect(buffer[0] == 65)
-        #expect(buffer.withUnsafeMutableBufferPointer { api.completeAudio?(pcm, 123, $0) } == 8)
+        #expect(buffer.withUnsafeMutableBufferPointer { api.completeAudio(pcm, 123, $0) } == 8)
         #expect(buffer[0] == 66)
-        #expect(buffer.withUnsafeMutableBufferPointer { api.streamProcess?(pcm, options, $0) } == 3)
+        #expect(buffer.withUnsafeMutableBufferPointer { api.streamProcess(pcm, options, $0) } == 3)
         #expect(buffer[0] == 67)
-        #expect(buffer.withUnsafeMutableBufferPointer { api.streamStop?($0) } == 0)
+        #expect(buffer.withUnsafeMutableBufferPointer { api.streamStop($0) } == 0)
         #expect(buffer[0] == 68)
     }
-    api.setAudio?(AudioOptions())
+    api.setAudio(AudioOptions())
 }
 
 extension NativeIntegrationTests {

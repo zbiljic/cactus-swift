@@ -1,9 +1,11 @@
 import CryptoKit
 import Foundation
 
-/// Downloads the same pinned Needle engines and base weights as cactus-go.
+/// Downloads the same pinned engines and base weights as cactus-go.
 public enum Engine {
-    public static let version = "3.3.1"
+    /// The Cactus engine version, which runs Needle 3 (the default generation) and
+    /// Whistle. Needle 2 keeps its own engine; see `version(for:)`.
+    public static let version = "4.0.0"
     static let maximumArtifactSize = 64 * 1024 * 1024
 
     public enum Platform: String, CaseIterable, Sendable {
@@ -63,17 +65,23 @@ public enum Engine {
         return try NativeRuntime.weightsGeneration(file.read(upToCount: 4) ?? Data())
     }
 
+    /// The environment variables that override engine discovery for a generation
+    /// (zero means 3), in lookup order. The first non-empty variable selects the library.
+    public static func libraryPathVariables(for generation: Int) throws -> [String] {
+        try EngineRelease(generation).generation == 2 ? ["NEEDLE2_LIB_PATH", "NEEDLE_LIB_PATH"] : ["CACTUS_LIB_PATH"]
+    }
+
     static func libraryOverride(
         _ path: String?,
         generation: Int,
         environment: [String: String] = ProcessInfo.processInfo.environment
-    ) -> String? {
-        [path, environment["NEEDLE\(generation)_LIB_PATH"], generation == 2 ? environment["NEEDLE_LIB_PATH"] : nil]
+    ) throws -> String? {
+        try ([path] + libraryPathVariables(for: generation).map { environment[$0] })
             .compactMap(\.self).first { !$0.isEmpty }
     }
 
     static func resolveLibrary(generation: Int, path: String?, cacheDirectory: URL?) async throws -> URL {
-        if let override = libraryOverride(path, generation: generation) {
+        if let override = try libraryOverride(path, generation: generation) {
             try validateCString(override, name: "library path")
             return URL(fileURLWithPath: override).standardizedFileURL
         }
@@ -163,7 +171,9 @@ public enum Engine {
                 if attempt > 0 {
                     try await Task.sleep(for: .milliseconds(250 * attempt))
                 }
-                downloaded = try await downloadAttempt(request, checksum: artifact.checksum, session: session)
+                downloaded = try await downloadAttempt(
+                    request, size: artifact.size, checksum: artifact.checksum, session: session
+                )
                 break
             } catch {
                 try Task.checkCancellation()
@@ -194,28 +204,35 @@ public enum Engine {
         return target
     }
 
-    static func downloadAttempt(_ request: URLRequest, checksum: String, session: URLSession) async throws -> Data {
+    static func downloadAttempt(
+        _ request: URLRequest, size: Int, checksum: String, session: URLSession
+    ) async throws -> Data {
         let (bytes, response) = try await session.bytes(for: request)
         guard let response = response as? HTTPURLResponse, response.statusCode == 200 else {
             throw CactusError
                 .download("engine download returned HTTP \((response as? HTTPURLResponse)?.statusCode ?? 0)")
         }
-        guard response.expectedContentLength <= maximumArtifactSize else {
-            throw CactusError.download("artifact exceeds \(maximumArtifactSize) bytes")
+        let reported = response.expectedContentLength
+        guard reported < 0 || reported == size else {
+            throw CactusError.download("size mismatch: server reports \(reported) bytes, want \(size)")
         }
         var data = Data()
+        data.reserveCapacity(size)
         for try await byte in bytes {
-            guard data.count < maximumArtifactSize else {
-                throw CactusError.download("artifact exceeds \(maximumArtifactSize) bytes")
+            guard data.count < size else {
+                throw CactusError.download("size mismatch: artifact exceeds \(size) bytes")
             }
             data.append(byte)
+        }
+        guard data.count == size else {
+            throw CactusError.download("size mismatch: got \(data.count) bytes, want \(size)")
         }
         guard digest(data) == checksum else { throw CactusError.download("engine checksum mismatch") }
         return data
     }
 
     static func extractLibrary(archive: URL, temporary: URL, member: String) throws -> Data {
-        let output = temporary.appendingPathComponent("libneedle.dylib")
+        let output = temporary.appendingPathComponent("library")
         guard FileManager.default.createFile(atPath: output.path, contents: nil) else {
             throw CactusError.download("cannot create temporary library")
         }

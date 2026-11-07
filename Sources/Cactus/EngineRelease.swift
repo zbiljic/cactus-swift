@@ -1,49 +1,85 @@
 import Foundation
 
+/// One file published on Hugging Face at a fixed commit, pinned by size and checksum.
 struct EngineArtifact: Sendable {
+    /// The installed file name in the cache directory.
     let name: String
-    let url: String
+    let repository: String
+    let revision: String
+    let path: String
+    let size: Int
     let checksum: String
+    /// The library inside a wheel; nil for weights.
     var archivePath: String?
+
+    var url: String {
+        "https://huggingface.co/\(repository)/resolve/\(revision)/\(path)"
+    }
 }
 
 /// One downloadable release: the engine libraries per platform and, when the
-/// engine needs them, the weights archive published beside them.
+/// engine needs them, the base weights it loads.
 struct EngineRelease: Sendable {
     let generation: Int
     let version: String
     let libraryName: String
     private let libraries: [Engine.Platform: EngineArtifact]
-    /// The archive loaded with `needle_load`; nil for Needle 2, whose engine embeds its model.
+    /// The archive loaded with `cactus_load`; nil for Needle 2, whose engine embeds its model.
     let weights: EngineArtifact?
 
-    static let needle2 = pin(
+    static let needle2 = Self(
         generation: 2,
         version: "2.0.4",
-        source: ("Cactus-Compute/needle2", "32e9e3a93b205f786929697446ae669cf0a84579"),
         libraryName: "libneedle.dylib",
-        checksums: [
-            .darwinARM64: "abae4cca0a4d84ec73da4bde18803b9be812a9209e48fb7fa372002ebaa60265",
-            .darwinAMD64: "071e93d996021b4f6b5bee055777cd81be9f6963d2565115ec461b9f71c7245e",
-        ]
+        libraries: [
+            .darwinARM64: needle2Wheel(
+                "macosx_11_0_arm64",
+                size: 13_323_841,
+                checksum: "abae4cca0a4d84ec73da4bde18803b9be812a9209e48fb7fa372002ebaa60265"
+            ),
+            .darwinAMD64: needle2Wheel(
+                "macosx_11_0_x86_64",
+                size: 13_217_806,
+                checksum: "071e93d996021b4f6b5bee055777cd81be9f6963d2565115ec461b9f71c7245e"
+            ),
+        ],
+        weights: nil
     )
 
-    static let needle3 = pin(
+    /// The Cactus engine, which runs Needle 3 and Whistle.
+    static let needle3 = Self(
         generation: 3,
         version: Engine.version,
-        source: ("Cactus-Compute/needle3", "93e88ede867e4311c39151285e74df513e4b835b"),
-        libraryName: "libneedle3.dylib",
-        checksums: [
-            .darwinARM64: "19534f411ad71312031d6df5418d0e55b8d16075c28a217aef4b921349bdfb4a",
-            .darwinAMD64: "e74ac1204ffe29d75db1215d889ad46c8add39e52042df22cd99c2e37855c273",
+        libraryName: "libcactus.dylib",
+        libraries: [
+            .darwinARM64: cactusWheel(
+                "macosx_11_0_arm64",
+                size: 720_571,
+                checksum: "782a43480285bf36e7dda947f50496dc597dceb26a8f8f9406d89fbe7ce96a1c"
+            ),
+            .darwinAMD64: cactusWheel(
+                "macosx_11_0_x86_64",
+                size: 780_485,
+                checksum: "ba674f62f53d91328d0b925ba9c179c15f6fef04865b334ac9c505d83d5932da"
+            ),
         ],
-        weights: ("needle3.cact", "c9d915eca282ed42d1a09b143b592adb4cc6744ffe2d294adf5cfc5548170c38")
+        weights: EngineArtifact(
+            name: "needle3.cact",
+            repository: "Cactus-Compute/needle3",
+            revision: "d6c7d6a2e9655505e0f8e23339356dd1705900eb",
+            path: "needle3.cact",
+            size: 35_335_380,
+            checksum: "c9d915eca282ed42d1a09b143b592adb4cc6744ffe2d294adf5cfc5548170c38"
+        )
     )
 
-    /// Speech weights run on the Needle 3 engine and share its cache directory.
+    /// Speech weights run on the Cactus engine and share its cache directory.
     static let speechWeights = EngineArtifact(
         name: "whistle.cact",
-        url: "https://huggingface.co/Cactus-Compute/whistle/resolve/b358ddadd89b7a713b5aa131f23032d3cca1b251/whistle.cact",
+        repository: "Cactus-Compute/whistle",
+        revision: "741118687e1f008f06d1351a402a731274789790",
+        path: "whistle.cact",
+        size: 16_919_407,
         checksum: "b6e02f048568ac5d01a2042556c658061e699acbc0aa2a1439f52f3d461dffeb"
     )
 
@@ -55,34 +91,29 @@ struct EngineRelease: Sendable {
         weights: speechWeights
     )
 
-    private static func pin(
-        generation: Int,
-        version: String,
-        source: (repository: String, revision: String),
-        libraryName: String,
-        checksums: [Engine.Platform: String],
-        weights: (name: String, checksum: String)? = nil
-    ) -> Self {
-        let root = "https://huggingface.co/\(source.repository)/resolve/\(source.revision)"
-        let libraries = checksums.map { platform, checksum in
-            let architecture = platform == .darwinARM64 ? "arm64" : "x86_64"
-            let filename = "cactus_needle-\(version)-py3-none-macosx_11_0_\(architecture).whl"
-            return (
-                platform,
-                EngineArtifact(
-                    name: libraryName,
-                    url: "\(root)/python/\(filename)",
-                    checksum: checksum,
-                    archivePath: "needle/\(libraryName)"
-                )
-            )
-        }
-        return Self(
-            generation: generation,
-            version: version,
-            libraryName: libraryName,
-            libraries: Dictionary(uniqueKeysWithValues: libraries),
-            weights: weights.map { EngineArtifact(name: $0.name, url: "\(root)/\($0.name)", checksum: $0.checksum) }
+    private static func needle2Wheel(_ tag: String, size: Int, checksum: String) -> EngineArtifact {
+        EngineArtifact(
+            name: "libneedle.dylib",
+            repository: "Cactus-Compute/needle2",
+            revision: "32e9e3a93b205f786929697446ae669cf0a84579",
+            path: "python/cactus_needle-2.0.4-py3-none-\(tag).whl",
+            size: size,
+            checksum: checksum,
+            archivePath: "needle/libneedle.dylib"
+        )
+    }
+
+    /// Sizes and checksums come from releases/4.0.0/manifest.json (sha256
+    /// b6a39fb21bc77780c029c45d4cc206b60f883146fa2dbc28bfcc9995fe72b871).
+    private static func cactusWheel(_ tag: String, size: Int, checksum: String) -> EngineArtifact {
+        EngineArtifact(
+            name: "libcactus.dylib",
+            repository: "Cactus-Compute/cactus",
+            revision: "1a028f5a3972b67dd8d8752f882113d475e7ec4c",
+            path: "releases/\(Engine.version)/python/cactus_runtime-\(Engine.version)-py3-none-\(tag).whl",
+            size: size,
+            checksum: checksum,
+            archivePath: "cactus/libcactus.dylib"
         )
     }
 

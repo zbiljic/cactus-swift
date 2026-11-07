@@ -7,12 +7,10 @@ public enum CactusError: Error, LocalizedError, Sendable {
     case invalidInput(String)
     /// A generation other than 2 or 3, or a feature the selected generation lacks.
     case unsupportedGeneration(String)
-    /// A native library with an incomplete capability set.
-    case unsupportedABI(missing: String)
-    /// The model or engine has no embeddings.
+    /// A native library that does not export the complete ABI of the selected generation.
+    case unsupportedABI(String)
+    /// The generation has no embeddings.
     case embeddingUnsupported(String)
-    /// The engine has no speech ABI.
-    case speechUnsupported(String)
     /// An engine call returned a failure code. `detail` carries the engine's
     /// diagnostic when one is available.
     case nativeFailure(operation: String, code: Int32, detail: String)
@@ -31,11 +29,10 @@ public enum CactusError: Error, LocalizedError, Sendable {
     public var errorDescription: String? {
         switch self {
         case let .invalidInput(message), let .native(message), let .download(message),
-             let .unsupportedGeneration(message), let .embeddingUnsupported(message),
-             let .speechUnsupported(message):
+             let .unsupportedGeneration(message), let .embeddingUnsupported(message):
             "cactus: \(message)"
-        case let .unsupportedABI(missing):
-            "cactus: unsupported native ABI: missing \(missing)"
+        case let .unsupportedABI(message):
+            "cactus: unsupported native ABI: \(message)"
         case .streamActive:
             "cactus: a live transcription is in progress"
         case .closed:

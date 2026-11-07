@@ -8,7 +8,8 @@ func embeddingBoundsErrorsAndStatelessContext() async throws {
     let library = URL(fileURLWithPath: "/test/libneedle.dylib")
     let fake = FakeNative()
     var api = fake.api
-    api.embed = { text, buffer in
+    var cactus = CactusFunctions.unused
+    cactus.embed = { text, buffer in
         #expect(text == "hello")
         if buffer.isEmpty {
             return 2
@@ -17,6 +18,7 @@ func embeddingBoundsErrorsAndStatelessContext() async throws {
         buffer[1] = -0.5
         return 2
     }
+    api.cactus = cactus
     let runtime = NativeRuntime(api: api)
     try await runtime.initialize(session, library: library)
     #expect(try await runtime.embed(session, text: "hello") == [0.5, -0.5])
@@ -24,17 +26,18 @@ func embeddingBoundsErrorsAndStatelessContext() async throws {
     await #expect(throws: CactusError.self) { try await runtime.embed(session, text: "bad\0input") }
     let legacy = try Session(Configuration(generation: 2))
     await #expect(throws: CactusError.self) { try await runtime.embed(legacy, text: "hello") }
-    let missing = NativeRuntime(api: fake.api)
-    try await missing.initialize(session, library: library)
-    await #expect(throws: CactusError.self) { try await missing.embed(session, text: "hello") }
+    // Only the Cactus engine embeds; the Needle 2 engine has no Cactus functions.
+    let needle2 = NativeRuntime(api: fake.api)
+    try await needle2.initialize(session, library: library)
+    await #expect(throws: CactusError.self) { try await needle2.embed(session, text: "hello") }
     for (size, result): (Int32, Int32) in [(0, 0), (-1, 0), (1 << 20 + 1, 0), (2, -2), (2, 1)] {
-        api.embed = { _, buffer in buffer.isEmpty ? size : result }
+        api.cactus?.embed = { _, buffer in buffer.isEmpty ? size : result }
         api.lastError = { "embedding failed" }
         let runtime = NativeRuntime(api: api)
         try await runtime.initialize(session, library: library)
         await #expect(throws: CactusError.self) { try await runtime.embed(session, text: "hello") }
     }
-    api.embed = { _, buffer in
+    api.cactus?.embed = { _, buffer in
         #expect(buffer.isEmpty)
         withUnsafeCurrentTask { $0?.cancel() }
         return 2

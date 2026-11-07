@@ -79,7 +79,7 @@ public struct WhistleConfiguration: Sendable {
     }
 }
 
-/// Opt-in speech using the same serialized process-wide engine as Needle 3 text.
+/// Opt-in speech on the Cactus engine, serialized with Needle 3 text in one process-wide runtime.
 public final class Whistle: Sendable {
     public static let sampleRate = 16000
     /// Bounds transcript JSON per second of audio, as upstream does, so long

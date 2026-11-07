@@ -29,6 +29,11 @@ description = "Test both pinned engines, text embeddings and Whistle speech"
 env.CACTUS_NATIVE_TEST = "1"
 run = "swift test --filter NativeIntegrationTests"
 
+[tasks."test:artifacts"]
+description = "Download and verify every pinned engine wheel and weights archive"
+env.CACTUS_ARTIFACT_TEST = "1"
+run = "swift test --filter PinnedArtifactTests"
+
 [tasks.check]
 description = "Run the full local validation suite"
 depends = ["fmt:check", "lint", "test"]

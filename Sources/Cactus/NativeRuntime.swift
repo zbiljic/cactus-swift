@@ -22,8 +22,8 @@ struct NativeAPI: Sendable {
     typealias SetAudio = @convention(c) (UnsafePointer<CChar>?, UnsafePointer<CChar>?, Int32) -> Void
     typealias Reset = @convention(c) () -> Void
     typealias Load = @convention(c) (UnsafeRawPointer?, UInt64) -> Int32
-    typealias Embed = @convention(c) (UnsafePointer<CChar>?, UnsafeMutablePointer<Float>?, Int32) -> Int32
-    typealias EmbedWithAudio = @convention(c) (
+    typealias LastError = @convention(c) () -> UnsafePointer<CChar>?
+    typealias Embed = @convention(c) (
         UnsafePointer<CChar>?, UnsafePointer<Float>?, Int32, UnsafeMutablePointer<Float>?, Int32
     ) -> Int32
 
@@ -33,131 +33,88 @@ struct NativeAPI: Sendable {
     let load: @Sendable (UnsafeRawPointer, UInt64) -> Int32
 
     var lastError: (@Sendable () -> String?)?
-    var embed: (@Sendable (String, UnsafeMutableBufferPointer<Float>) -> Int32)?
+    /// The functions only the Cactus engine exports; nil for the Needle 2 engine.
+    var cactus: CactusFunctions?
 
-    var transcribe: (@Sendable (UnsafeBufferPointer<Float>, AudioOptions, UnsafeMutableBufferPointer<CChar>) -> Int32)?
-    var setAudio: (@Sendable (AudioOptions) -> Void)?
-    var completeAudio: (@Sendable (UnsafeBufferPointer<Float>, Int32, UnsafeMutableBufferPointer<CChar>) -> Int32)?
-    typealias StreamProcessCall = @Sendable (
-        UnsafeBufferPointer<Float>,
-        AudioOptions,
-        UnsafeMutableBufferPointer<CChar>
-    ) -> Int32
-    var streamProcess: StreamProcessCall?
-    var streamStop: (@Sendable (UnsafeMutableBufferPointer<CChar>) -> Int32)?
+    /// The Needle 2 engine's needle_* ABI: it embeds its model and completes with four arguments.
+    static let needle2Symbols = ["init", "complete", "reset", "load"]
 
-    static func open(_ path: String) throws -> Self {
+    /// The cactus_* ABI that the Cactus engine exports in full. cactus_describe is
+    /// bound only when vision support needs it.
+    static let cactusSymbols = [
+        "load", "models", "last_error", "init", "complete", "set_audio", "reset",
+        "embed", "transcribe", "stream_transcribe_process", "stream_transcribe_stop",
+    ]
+
+    static func open(_ path: String, generation: Int) throws -> Self {
         guard let handle = dlopen(path, RTLD_NOW | RTLD_LOCAL) else {
             throw CactusError.native("load library: \(String(cString: dlerror()))")
         }
         do {
             // The engine owns process-global pointers; keep it mapped for process lifetime.
-            return try bind { dlsym(handle, $0) }
+            return try bind(generation: generation) { dlsym(handle, $0) }
         } catch {
             dlclose(handle)
             throw error
         }
     }
 
-    static func bind(resolve: (String) -> UnsafeMutableRawPointer?) throws -> Self {
-        func symbol<T>(_ name: String, as _: T.Type) throws -> T {
-            guard let address = resolve(name) else { throw CactusError.native("missing symbol \(name)") }
-            return unsafeBitCast(address, to: T.self)
+    /// Binds the ABI of a generation: needle_* for the Needle 2 engine and cactus_*
+    /// for the Cactus engine that runs Needle 3 and Whistle. A library missing any
+    /// function of that ABI is rejected.
+    static func bind(generation: Int, resolve: @escaping (String) -> UnsafeMutableRawPointer?) throws -> Self {
+        let needle2 = generation == 2
+        let function = needle2
+            ? Symbols(engine: "Needle 2 engine", prefix: "needle_", resolve: resolve)
+            : Symbols(engine: "Cactus engine", prefix: "cactus_", resolve: resolve)
+        for name in needle2 ? needle2Symbols : cactusSymbols {
+            _ = try function(name, as: UnsafeMutableRawPointer.self)
         }
-        let capabilities = ["needle_models", "needle_transcribe", "needle_set_audio"]
-        let modern = capabilities.contains { resolve($0) != nil }
-        if modern {
-            for name in capabilities + ["needle_last_error", "needle_embed"] where resolve(name) == nil {
-                throw CactusError.unsupportedABI(missing: name)
-            }
+        // Needle 3 libraries before Cactus 4 also export the four Needle 2 names,
+        // but with a six-argument needle_complete. needle_models identifies them.
+        if needle2, resolve("needle_models") != nil {
+            throw CactusError.unsupportedABI("Needle 3 library is not the Needle 2 engine")
         }
-        let initialize = try symbol("needle_init", as: Initialize.self)
+        let initialize = try function("init", as: Initialize.self)
+        let reset = try function("reset", as: Reset.self)
+        let load = try function("load", as: Load.self)
         let complete: @Sendable (String, Int32, UnsafeMutableBufferPointer<CChar>) -> Int32
-        if modern {
-            let function = try symbol("needle_complete", as: CompleteWithAudio.self)
+        if needle2 {
+            let needle = try function("complete", as: Complete.self)
             complete = { text, tokens, buffer in
-                text.withCString { function($0, nil, 0, tokens, buffer.baseAddress, Int32(buffer.count)) }
+                text.withCString { needle($0, tokens, buffer.baseAddress, Int32(buffer.count)) }
             }
         } else {
-            let function = try symbol("needle_complete", as: Complete.self)
+            let cactus = try function("complete", as: CompleteWithAudio.self)
             complete = { text, tokens, buffer in
-                text.withCString { function($0, tokens, buffer.baseAddress, Int32(buffer.count)) }
+                text.withCString { cactus($0, nil, 0, tokens, buffer.baseAddress, Int32(buffer.count)) }
             }
         }
-        let reset = try symbol("needle_reset", as: Reset.self)
-        let load = try symbol("needle_load", as: Load.self)
         var api = Self(
             initialize: { initialize($0, $1, $2) },
             complete: complete,
             reset: { reset() },
             load: { load($0, $1) }
         )
-        if let address = resolve("needle_last_error") {
-            let function = unsafeBitCast(address, to: (@convention(c) () -> UnsafePointer<CChar>?).self)
-            api.lastError = { function().map { String(cString: $0) } }
-        }
-        api.bindEmbedding(resolve("needle_embed"), modern: modern)
-        if modern {
-            try api.bindSpeech(
-                complete: symbol("needle_complete", as: CompleteWithAudio.self),
-                transcribe: symbol("needle_transcribe", as: Transcribe.self),
-                setAudio: symbol("needle_set_audio", as: SetAudio.self)
-            )
-            // Streaming arrived with engine 3.2.0 as a pair of symbols.
-            let process = resolve("needle_stream_transcribe_process")
-            let stop = resolve("needle_stream_transcribe_stop")
-            if (process == nil) != (stop == nil) {
-                let missing = process == nil ? "needle_stream_transcribe_process" : "needle_stream_transcribe_stop"
-                throw CactusError.unsupportedABI(missing: missing)
-            }
-            if let process, let stop {
-                api.bindStream(
-                    process: unsafeBitCast(process, to: StreamProcess.self),
-                    stop: unsafeBitCast(stop, to: StreamStop.self)
-                )
-            }
-        }
+        guard !needle2 else { return api }
+        let lastError = try function("last_error", as: LastError.self)
+        api.lastError = { lastError().map { String(cString: $0) } }
+        api.cactus = try CactusFunctions(function)
         return api
     }
 
-    private mutating func bindEmbedding(_ address: UnsafeMutableRawPointer?, modern: Bool) {
-        guard let address else { return }
-        if modern {
-            let function = unsafeBitCast(address, to: EmbedWithAudio.self)
-            embed = { text, output in
-                text.withCString { function($0, nil, 0, output.baseAddress, Int32(output.count)) }
-            }
-        } else {
-            let function = unsafeBitCast(address, to: Embed.self)
-            embed = { text, output in
-                text.withCString { function($0, output.baseAddress, Int32(output.count)) }
-            }
-        }
-    }
+    /// Resolves one engine's prefixed symbols, rejecting a library that lacks one.
+    struct Symbols {
+        let engine: String
+        let prefix: String
+        let resolve: (String) -> UnsafeMutableRawPointer?
 
-    private mutating func bindSpeech(
-        complete: @escaping CompleteWithAudio,
-        transcribe: @escaping Transcribe,
-        setAudio: @escaping SetAudio
-    ) {
-        completeAudio = { pcm, tokens, output in
-            complete(nil, pcm.baseAddress, Int32(pcm.count), tokens, output.baseAddress, Int32(output.count))
-        }
-        self.transcribe = { pcm, options, output in
-            options.withCStringOptions {
-                transcribe(pcm.baseAddress, Int32(pcm.count), $0, $1, $2, output.baseAddress, Int32(output.count))
+        func callAsFunction<T>(_ name: String, as _: T.Type) throws -> T {
+            guard let address = resolve(prefix + name) else {
+                throw CactusError.unsupportedABI("\(engine) is missing \(prefix)\(name)")
             }
+            return unsafeBitCast(address, to: T.self)
         }
-        self.setAudio = { options in options.withCStringOptions { setAudio($0, $1, $2) } }
-    }
-
-    private mutating func bindStream(process: @escaping StreamProcess, stop: @escaping StreamStop) {
-        streamProcess = { pcm, options, output in
-            options.withCStringOptions { language, keywords, _ in
-                process(pcm.baseAddress, Int32(pcm.count), language, keywords, output.baseAddress, Int32(output.count))
-            }
-        }
-        streamStop = { output in stop(output.baseAddress, Int32(output.count)) }
     }
 
     func output(_ operation: String, code: Int32, buffer: [CChar]) throws -> Data {
@@ -175,6 +132,56 @@ struct NativeAPI: Sendable {
         let diagnostic = (lastError?() ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         let detail = diagnostic.isEmpty ? fallback.trimmingCharacters(in: .whitespacesAndNewlines) : diagnostic
         return .nativeFailure(operation: operation, code: code, detail: detail)
+    }
+}
+
+/// The Cactus engine functions beyond the text ABI it shares with Needle 2:
+/// embeddings, speech and live transcription.
+struct CactusFunctions: Sendable {
+    typealias StreamProcessCall = @Sendable (
+        UnsafeBufferPointer<Float>,
+        AudioOptions,
+        UnsafeMutableBufferPointer<CChar>
+    ) -> Int32
+
+    var embed: @Sendable (String, UnsafeMutableBufferPointer<Float>) -> Int32
+    var transcribe: @Sendable (UnsafeBufferPointer<Float>, AudioOptions, UnsafeMutableBufferPointer<CChar>) -> Int32
+    var setAudio: @Sendable (AudioOptions) -> Void
+    var completeAudio: @Sendable (UnsafeBufferPointer<Float>, Int32, UnsafeMutableBufferPointer<CChar>) -> Int32
+    var streamProcess: StreamProcessCall
+    var streamStop: @Sendable (UnsafeMutableBufferPointer<CChar>) -> Int32
+}
+
+extension CactusFunctions {
+    init(_ function: NativeAPI.Symbols) throws {
+        let embed = try function("embed", as: NativeAPI.Embed.self)
+        let complete = try function("complete", as: NativeAPI.CompleteWithAudio.self)
+        let transcribe = try function("transcribe", as: NativeAPI.Transcribe.self)
+        let setAudio = try function("set_audio", as: NativeAPI.SetAudio.self)
+        let streamProcess = try function("stream_transcribe_process", as: NativeAPI.StreamProcess.self)
+        let streamStop = try function("stream_transcribe_stop", as: NativeAPI.StreamStop.self)
+        self.init(
+            embed: { text, output in
+                text.withCString { embed($0, nil, 0, output.baseAddress, Int32(output.count)) }
+            },
+            transcribe: { pcm, options, output in
+                options.withCStringOptions {
+                    transcribe(pcm.baseAddress, Int32(pcm.count), $0, $1, $2, output.baseAddress, Int32(output.count))
+                }
+            },
+            setAudio: { options in options.withCStringOptions { setAudio($0, $1, $2) } },
+            completeAudio: { pcm, tokens, output in
+                complete(nil, pcm.baseAddress, Int32(pcm.count), tokens, output.baseAddress, Int32(output.count))
+            },
+            streamProcess: { pcm, options, output in
+                options.withCStringOptions { language, keywords, _ in
+                    streamProcess(
+                        pcm.baseAddress, Int32(pcm.count), language, keywords, output.baseAddress, Int32(output.count)
+                    )
+                }
+            },
+            streamStop: { output in streamStop(output.baseAddress, Int32(output.count)) }
+        )
     }
 }
 
@@ -211,18 +218,18 @@ actor NativeRuntime {
     }
 
     func initialize(_ session: Session, library: URL) throws {
-        try ensureLibrary(library)
+        try ensureLibrary(library, generation: session.generation)
         try bind(session)
     }
 
-    private func ensureLibrary(_ library: URL) throws {
+    private func ensureLibrary(_ library: URL, generation: Int) throws {
         try Task.checkCancellation()
         let path = library.standardizedFileURL.path
         if let libraryPath, libraryPath != path {
             throw CactusError.native("engine already loaded from \(libraryPath)")
         }
         if api == nil {
-            api = try NativeAPI.open(path)
+            api = try NativeAPI.open(path, generation: generation)
         }
         libraryPath = path
     }
@@ -277,9 +284,8 @@ actor NativeRuntime {
         guard session.generation == 3 else { throw CactusError.embeddingUnsupported("embeddings require Needle 3") }
         try validateCString(text, name: "input")
         let api = try bind(session)
-        guard let embed = api.embed else {
-            throw CactusError.embeddingUnsupported("engine does not support embeddings")
-        }
+        // Only the Needle 2 engine lacks these, and its runtime never serves Needle 3.
+        guard let embed = api.cactus?.embed else { throw Self.cactusRequired }
         let size = embed(text, UnsafeMutableBufferPointer(start: nil, count: 0))
         guard size >= 0 else { throw api.failure("embed size", code: size) }
         guard
@@ -295,15 +301,17 @@ actor NativeRuntime {
     }
 
     func initializeSpeech(_ session: SpeechSession, library: URL) throws {
-        try ensureLibrary(library)
+        try ensureLibrary(library, generation: 3)
         try bindSpeech(session)
     }
 
+    /// A loaded library without the cactus_* functions; only the Needle 2 engine lacks them.
+    private static let cactusRequired = CactusError.unsupportedABI("Cactus engine is required")
+
     @discardableResult
-    private func bindSpeech(_ session: SpeechSession) throws -> NativeAPI {
-        guard let api, api.transcribe != nil, api.setAudio != nil, api.completeAudio != nil else {
-            throw CactusError.speechUnsupported("engine does not support speech; use Needle 3.1 or newer")
-        }
+    private func bindSpeech(_ session: SpeechSession) throws -> (NativeAPI, CactusFunctions) {
+        guard let api else { throw CactusError.native("engine is not loaded") }
+        guard let cactus = api.cactus else { throw Self.cactusRequired }
         guard !closedSessions.contains(session.id) else { throw CactusError.closed }
         if speechWeights != session.weightsPath {
             // Switching speech weights would discard the open stream.
@@ -321,16 +329,14 @@ actor NativeRuntime {
             speechBlob = blob
             speechWeights = session.weightsPath
         }
-        return api
+        return (api, cactus)
     }
 
     func transcribe(_ session: SpeechSession, pcm: [Float], options: AudioOptions) throws -> Transcript {
         try Task.checkCancellation()
         guard openStream == nil else { throw CactusError.streamActive }
-        let api = try bindSpeech(session)
-        guard let transcribe = api.transcribe else {
-            throw CactusError.speechUnsupported("engine does not support speech")
-        }
+        let (api, cactus) = try bindSpeech(session)
+        let transcribe = cactus.transcribe
         var buffer = [CChar](repeating: 0, count: session.outputCapacity(samples: pcm.count))
         let samples = pcm.isEmpty ? [Float(0)] : pcm
         let code = samples.withUnsafeBufferPointer { samples in
@@ -347,11 +353,9 @@ actor NativeRuntime {
     ) throws -> Response {
         try Task.checkCancellation()
         guard openStream == nil else { throw CactusError.streamActive }
-        let api = try bindSpeech(session)
+        let (api, cactus) = try bindSpeech(session)
         try bind(text)
-        guard let complete = api.completeAudio, let setAudio = api.setAudio else {
-            throw CactusError.speechUnsupported("engine does not support speech")
-        }
+        let (complete, setAudio) = (cactus.completeAudio, cactus.setAudio)
         if text.stateless {
             api.reset()
         }
@@ -370,7 +374,8 @@ actor NativeRuntime {
 
     func streamProcess(_ stream: StreamSession, pcm: [Float]) throws -> StreamTranscript {
         try Task.checkCancellation()
-        let (api, process) = try bindStream(stream)
+        let (api, cactus) = try bindStream(stream)
+        let process = cactus.streamProcess
         var buffer = [CChar](repeating: 0, count: stream.speech.outputCapacity(samples: pcm.count))
         let samples = pcm.isEmpty ? [Float(0)] : pcm
         let code = samples.withUnsafeBufferPointer { samples in
@@ -393,8 +398,8 @@ actor NativeRuntime {
 
     func streamStop(_ stream: StreamSession) throws -> StreamTranscript {
         try Task.checkCancellation()
-        let (api, _) = try bindStream(stream)
-        guard let stop = api.streamStop else { throw Self.streamingUnsupported }
+        let (api, cactus) = try bindStream(stream)
+        let stop = cactus.streamStop
         var buffer = [CChar](repeating: 0, count: stream.speech.bufferSize)
         let code = buffer.withUnsafeMutableBufferPointer { stop($0) }
         openStream = nil
@@ -405,26 +410,21 @@ actor NativeRuntime {
         }
     }
 
-    private static let streamingUnsupported = CactusError
-        .speechUnsupported("engine does not support live transcription; use Needle 3.2 or newer")
-
     /// Checks that this stream may use the engine.
-    private func bindStream(_ stream: StreamSession) throws -> (NativeAPI, NativeAPI.StreamProcessCall) {
+    private func bindStream(_ stream: StreamSession) throws -> (NativeAPI, CactusFunctions) {
         if endedStreams.remove(stream.id) != nil {
             throw StreamFailure(TranscriptionStream.stoppedError)
         }
         if let openStream, openStream.id != stream.id {
             throw CactusError.streamActive
         }
-        let api = try bindSpeech(stream.speech)
-        guard let process = api.streamProcess, api.streamStop != nil else { throw Self.streamingUnsupported }
-        return (api, process)
+        return try bindSpeech(stream.speech)
     }
 
     /// Stops the engine's stream without reporting its tail.
     private func endStream(_ stream: StreamSession) {
         guard openStream?.id == stream.id else { return }
-        if let stop = api?.streamStop {
+        if let stop = api?.cactus?.streamStop {
             var buffer = [CChar](repeating: 0, count: stream.speech.bufferSize)
             _ = buffer.withUnsafeMutableBufferPointer { stop($0) }
         }

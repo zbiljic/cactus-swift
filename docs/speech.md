@@ -1,8 +1,8 @@
 # Speech
 
 `Whistle` loads the checksum-pinned ~16.9 MB `whistle.cact` archive from
-[Cactus-Compute/whistle](https://huggingface.co/Cactus-Compute/whistle) and uses
-the Needle 3 engine. Speech weights download only when requested; standalone
+[Cactus-Compute/whistle](https://huggingface.co/Cactus-Compute/whistle) and runs
+on the Cactus engine. Speech weights download only when requested; standalone
 transcription does not require text weights.
 
 ## Transcription
@@ -48,8 +48,7 @@ let tail = try await live.stop()
 The engine holds one stream per process. While a stream is open, other speech
 calls, a second stream, and loading different speech weights throw
 `CactusError.streamActive`; a failed `process` ends the stream, and `close` on
-its Whistle ends it too. Streaming needs engine 3.2 or newer; older libraries
-throw `CactusError.speechUnsupported`.
+its Whistle ends it too.
 
 ## Audio tool calling
 
@@ -71,7 +70,8 @@ through `agent.complete`.
 
 ## Runtime and custom weights
 
-Text and speech share the same serialized Needle 3 runtime and library path.
+Needle 3 text and speech share the same serialized Cactus engine runtime and
+library path.
 Loading or switching speech models preserves the active text conversation;
 switching text agents follows the [conversation rules](../README.md#model-generations).
 Audio options are cleared after every audio completion. Task cancellation cannot

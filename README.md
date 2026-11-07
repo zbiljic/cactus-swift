@@ -154,8 +154,8 @@ let vector = try await agent.embed("turn on the kitchen lights")
 ```
 
 `embed` preserves the conversation, including in stateless mode. Switching
-agents follows the conversation rules below. Needle 2 and engines without
-`needle_embed` return an error; legacy and audio-capable Needle 3 ABIs work.
+agents follows the conversation rules below. Needle 2 agents throw
+`CactusError.embeddingUnsupported`.
 
 The base model exposes confidence-head probe features, rather than a trained
 contrastive retrieval head. Evaluate similarity on your own data before using
@@ -164,17 +164,16 @@ these vectors for search. This API does not enable automatic tool retrieval.
 ## Speech
 
 `Whistle` adds optional speech transcription, live streaming transcription,
-and audio tool calling with Needle 3. It accepts 16 kHz mono `[Float]` PCM of
-any length. Speech weights
-are downloaded only when requested.
+and audio tool calling on the Cactus engine. It accepts 16 kHz mono `[Float]`
+PCM of any length. Speech weights are downloaded only when requested.
 
 See the [speech guide](docs/speech.md) for the API, supported languages, runtime
 behavior, and offline setup.
 
 ## Model generations
 
-Needle **3** is the default (`generation: 0` also selects 3). Select Needle 2
-to use its embedded base model:
+Needle **3** is the default (`generation: 0` also selects 3) and runs on the
+Cactus engine. Select Needle 2 to use its own engine and embedded base model:
 
 ```swift
 let agent = try await Agent(configuration: Configuration(generation: 2))
@@ -200,8 +199,11 @@ requires a separate process. Needle 3 can reload its base archive.
 
 ## Engine downloads and caching
 
-By default, the library downloads and caches the pinned Needle 3 engine (3.3.1)
-and `needle3.cact` base weights (~35 MB). Subsequent runs use the cached files.
+By default, the library downloads and caches the pinned
+[Cactus engine](https://huggingface.co/Cactus-Compute/cactus) (4.0.0) and the
+`needle3.cact` base weights (~35 MB) from the
+[Needle 3 model repository](https://huggingface.co/Cactus-Compute/needle3).
+Subsequent runs use the cached files.
 
 ```swift
 let library = try await Engine.fetch(generation: 3) // Library and base weights, ready for offline use.
@@ -212,21 +214,23 @@ let version = try Engine.version(for: 2)            // "2.0.4"
 The library selects an engine matching the resolved generation in this order:
 
 1. `Configuration.libraryPath`.
-2. `NEEDLE2_LIB_PATH` or `NEEDLE3_LIB_PATH`. The legacy `NEEDLE_LIB_PATH` is a
-   fallback for Needle 2 only.
-3. A checksum-verified download of the pinned Needle 2.0.4 or Needle 3.3.1 engine.
+2. `CACTUS_LIB_PATH` for Needle 3, or `NEEDLE2_LIB_PATH`, then
+   `NEEDLE_LIB_PATH`, for Needle 2. `Engine.libraryPathVariables(for:)` lists them.
+3. A size- and checksum-verified download of the pinned Cactus engine (4.0.0)
+   or Needle 2 engine (2.0.4).
 
 A Needle 3 library override still fetches missing base weights unless
 `weightsPath` is supplied. Manual libraries must be trusted and ABI-compatible
 with the selected generation. Only one library path per generation can be used
-in a process. Legacy completion ABIs remain supported; incomplete modern
-capability sets are rejected before inference. Engines exposing
-`needle_last_error` include native failure details, such as context limits.
+in a process. Each generation binds one native ABI: `needle_*` from the
+Needle 2 engine and `cactus_*` from the Cactus engine. A library missing any
+function of that ABI throws `CactusError.unsupportedABI` before inference.
+Cactus engine failures include native details, such as context limits.
 
 Default caches are `~/.cache/cactus-swift/<engine-version>/<platform>/`. A custom
 `cacheDirectory` is the exact destination directory. Needle 2 uses
-`libneedle.dylib`; Needle 3 uses `libneedle3.dylib`, so both can share a custom
-directory for one platform.
+`libneedle.dylib` and the Cactus engine uses `libcactus.dylib`, so both can
+share a custom directory for one platform.
 
 For offline use, call `Engine.fetch` for the target platform and generation,
 preserve the downloaded files and `.sha256` markers, and use the same cache
@@ -237,8 +241,8 @@ verify checksums or check for base weights.
 
 Every failure is a `CactusError`. Match its cases instead of its text:
 `invalidInput`, `unsupportedGeneration`, `unsupportedABI`, `embeddingUnsupported`,
-`speechUnsupported`, `streamActive`, `closed`, `download`, `native`, and
-`validation` (also thrown by `run`).
+`streamActive`, `closed`, `download`, `native`, and `validation` (also thrown
+by `run`).
 A failed engine call is `nativeFailure` with the operation, the native code, and
 any engine diagnostic.
 
@@ -253,6 +257,7 @@ mise run                # List available tasks
 mise run fmt            # Format Swift source
 mise run check          # Formatting, lint, and offline tests
 mise run test:native    # Both engines, embeddings, and Whistle speech
+mise run test:artifacts # Download every pinned engine wheel and weights archive
 mise run clean          # Remove package build artifacts
 swift build -c release
 ```

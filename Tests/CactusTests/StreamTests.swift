@@ -22,14 +22,6 @@ private func isStopped(_ error: any Error) -> Bool {
     error.localizedDescription == "cactus: stream is stopped"
 }
 
-private func isSpeechUnsupported(_ error: any Error) -> Bool {
-    if case .speechUnsupported = error as? CactusError {
-        true
-    } else {
-        false
-    }
-}
-
 private struct SpeechFixture {
     let directory: URL
     let probe: SpeechProbe
@@ -37,12 +29,10 @@ private struct SpeechFixture {
     let config: WhistleConfiguration
     let speech: Whistle
 
-    init(mode: String = "ok", api: ((inout NativeAPI) -> Void)? = nil) async throws {
+    init(mode: String = "ok") async throws {
         directory = try speechDirectory()
         probe = SpeechProbe(mode: mode)
-        var native = probe.api
-        api?(&native)
-        runtime = NativeRuntime(api: native)
+        runtime = NativeRuntime(api: probe.api)
         config = WhistleConfiguration(
             weightsPath: directory.appendingPathComponent("speech.cact").path, libraryPath: "/test/libneedle.dylib"
         )
@@ -120,22 +110,12 @@ func streamFailureEndsStream(mode: String) async throws {
 }
 
 @Test
-func streamRejectsInvalidInputAndOlderEngines() async throws {
-    let older = try await SpeechFixture { api in
-        api.streamProcess = nil
-        api.streamStop = nil
-    }
-    defer { older.cleanup() }
-    for options in [AudioOptions(language: "sr"), AudioOptions(keywords: ["Ada\0"])] {
-        #expect(throws: CactusError.self) { try older.speech.stream(options: options) }
-    }
-    // Engine 3.1 has speech without streaming.
-    let unsupported = try older.speech.stream()
-    await #expect { try await unsupported.process([]) } throws: { isSpeechUnsupported($0) }
-    await #expect { try await unsupported.stop() } throws: { isSpeechUnsupported($0) }
-
+func streamRejectsInvalidInput() async throws {
     let fixture = try await SpeechFixture()
     defer { fixture.cleanup() }
+    for options in [AudioOptions(language: "sr"), AudioOptions(keywords: ["Ada\0"])] {
+        #expect(throws: CactusError.self) { try fixture.speech.stream(options: options) }
+    }
     let live = try fixture.speech.stream()
     for pcm: [Float] in [[.nan], [1.5]] {
         await #expect(throws: CactusError.self) { try await live.process(pcm) }

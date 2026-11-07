@@ -184,8 +184,10 @@ func invalidConfigurationFailsBeforeLoading() throws {
     ] {
         #expect(throws: CactusError.self) { try Session(config) }
     }
-    #expect(throws: CactusError.self) { try NativeAPI.open("/nonexistent/needle.dylib") }
-    #expect(throws: CactusError.self) { try NativeAPI.open("/usr/lib/libSystem.B.dylib") }
+    #expect(throws: CactusError.self) { try NativeAPI.open("/nonexistent/cactus.dylib", generation: 3) }
+    for generation in [2, 3] {
+        #expect(throws: CactusError.self) { try NativeAPI.open("/usr/lib/libSystem.B.dylib", generation: generation) }
+    }
 }
 
 @Test
@@ -264,7 +266,10 @@ func generationSelectionOverridesAndWeightReloads() async throws {
     #expect(try Session(Configuration()).generation == 3)
     #expect(try Session(Configuration(generation: 0)).generation == 3)
     #expect(Agent.defaultMaxNewTokens == 512)
-    let environment = ["NEEDLE2_LIB_PATH": "/v2", "NEEDLE3_LIB_PATH": "/v3", "NEEDLE_LIB_PATH": "/legacy"]
+    let environment = ["NEEDLE2_LIB_PATH": "/v2", "CACTUS_LIB_PATH": "/v3", "NEEDLE_LIB_PATH": "/legacy"]
+    #expect(try Engine.libraryPathVariables(for: 0) == ["CACTUS_LIB_PATH"])
+    #expect(try Engine.libraryPathVariables(for: 2) == ["NEEDLE2_LIB_PATH", "NEEDLE_LIB_PATH"])
+    #expect(throws: CactusError.self) { try Engine.libraryPathVariables(for: 4) }
     for generation in [2, 3] {
         let weights = directory.appendingPathComponent("v\(generation).cact")
         let header = generation == 2 ? Data([0x83, 0x2A, 0xE1, 0x05, 1]) : testWeights()
@@ -273,9 +278,12 @@ func generationSelectionOverridesAndWeightReloads() async throws {
         var base = try Session(Configuration(generation: generation))
         let tuned = try Session(Configuration(generation: 5 - generation, weightsPath: weights.path))
         #expect(tuned.generation == generation)
-        #expect(Engine.libraryOverride(nil, generation: generation, environment: environment) == "/v\(generation)")
-        #expect(Engine.libraryOverride("/explicit", generation: generation, environment: environment) == "/explicit")
-        #expect(Engine.libraryOverride("", generation: generation, environment: ["NEEDLE_LIB_PATH": "/legacy"])
+        #expect(try Engine.libraryOverride(nil, generation: generation, environment: environment)
+            == "/v\(generation)")
+        #expect(try Engine.libraryOverride("/explicit", generation: generation, environment: environment)
+            == "/explicit")
+        let fallbacks = ["NEEDLE_LIB_PATH": "/legacy", "NEEDLE3_LIB_PATH": "/old"]
+        #expect(try Engine.libraryOverride("", generation: generation, environment: fallbacks)
             == (generation == 2 ? "/legacy" : nil))
         let fake = FakeNative([finalResponse, finalResponse, finalResponse], loadCode: 1)
         let runtime = NativeRuntime(api: fake.api)
