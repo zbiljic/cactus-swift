@@ -47,10 +47,10 @@ struct StreamFailure: Error {
 /// A live transcription started by `Whistle.stream`. Feed about one second of
 /// PCM per `process` call and finish with `stop`, which commits the tail. The
 /// engine holds one stream per process: while a stream is open, speech calls
-/// other than its own `process` and `stop` throw `NeedleError.streamActive`.
+/// other than its own `process` and `stop` throw `CactusError.streamActive`.
 /// A failed `process` ends the stream. Closing the Whistle also ends it.
 public actor TranscriptionStream {
-    static let stoppedError = NeedleError.invalidInput("stream is stopped")
+    static let stoppedError = CactusError.invalidInput("stream is stopped")
 
     let session: StreamSession
     private let runtime: NativeRuntime

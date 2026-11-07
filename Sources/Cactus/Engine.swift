@@ -1,7 +1,7 @@
 import CryptoKit
 import Foundation
 
-/// Downloads the same pinned Needle engines and base weights as needle-go.
+/// Downloads the same pinned Needle engines and base weights as cactus-go.
 public enum Engine {
     public static let version = "3.3.1"
     static let maximumArtifactSize = 64 * 1024 * 1024
@@ -27,7 +27,7 @@ public enum Engine {
         let target = try directory(release: release, platform: platform, override: cacheDirectory)
             .appendingPathComponent(release.libraryName)
         guard try target.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile == true else {
-            throw NeedleError.download("cached engine is not a regular file: \(target.path)")
+            throw CactusError.download("cached engine is not a regular file: \(target.path)")
         }
         return target
     }
@@ -128,11 +128,11 @@ public enum Engine {
 
     static func directory(release: EngineRelease, platform: Platform, override: URL?) throws -> URL {
         if let override {
-            guard override.isFileURL else { throw NeedleError.invalidInput("cache directory must be a file URL") }
+            guard override.isFileURL else { throw CactusError.invalidInput("cache directory must be a file URL") }
             return override.standardizedFileURL
         }
         return FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".cache/cactus-needle/\(release.version)/\(platform.rawValue)", isDirectory: true)
+            .appendingPathComponent(".cache/cactus-swift/\(release.version)/\(platform.rawValue)", isDirectory: true)
     }
 
     static func digest(_ data: Data) -> String {
@@ -154,9 +154,9 @@ public enum Engine {
             return target
         }
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        guard let url = URL(string: artifact.url) else { throw NeedleError.download("invalid artifact URL") }
+        guard let url = URL(string: artifact.url) else { throw CactusError.download("invalid artifact URL") }
         var request = URLRequest(url: url, timeoutInterval: 300)
-        request.setValue("needle-swift/\(version)", forHTTPHeaderField: "User-Agent")
+        request.setValue("cactus-swift/\(version)", forHTTPHeaderField: "User-Agent")
         var downloaded = Data()
         for attempt in 0 ..< 3 {
             do {
@@ -175,7 +175,7 @@ public enum Engine {
         try Task.checkCancellation()
         let installed: Data
         if let member = artifact.archivePath {
-            let temporary = directory.appendingPathComponent(".needle-\(UUID().uuidString)", isDirectory: true)
+            let temporary = directory.appendingPathComponent(".cactus-\(UUID().uuidString)", isDirectory: true)
             try FileManager.default.createDirectory(at: temporary, withIntermediateDirectories: false)
             defer { try? FileManager.default.removeItem(at: temporary) }
             let archive = temporary.appendingPathComponent("engine.whl")
@@ -197,27 +197,27 @@ public enum Engine {
     static func downloadAttempt(_ request: URLRequest, checksum: String, session: URLSession) async throws -> Data {
         let (bytes, response) = try await session.bytes(for: request)
         guard let response = response as? HTTPURLResponse, response.statusCode == 200 else {
-            throw NeedleError
+            throw CactusError
                 .download("engine download returned HTTP \((response as? HTTPURLResponse)?.statusCode ?? 0)")
         }
         guard response.expectedContentLength <= maximumArtifactSize else {
-            throw NeedleError.download("artifact exceeds \(maximumArtifactSize) bytes")
+            throw CactusError.download("artifact exceeds \(maximumArtifactSize) bytes")
         }
         var data = Data()
         for try await byte in bytes {
             guard data.count < maximumArtifactSize else {
-                throw NeedleError.download("artifact exceeds \(maximumArtifactSize) bytes")
+                throw CactusError.download("artifact exceeds \(maximumArtifactSize) bytes")
             }
             data.append(byte)
         }
-        guard digest(data) == checksum else { throw NeedleError.download("engine checksum mismatch") }
+        guard digest(data) == checksum else { throw CactusError.download("engine checksum mismatch") }
         return data
     }
 
     static func extractLibrary(archive: URL, temporary: URL, member: String) throws -> Data {
         let output = temporary.appendingPathComponent("libneedle.dylib")
         guard FileManager.default.createFile(atPath: output.path, contents: nil) else {
-            throw NeedleError.download("cannot create temporary library")
+            throw CactusError.download("cannot create temporary library")
         }
         let handle = try FileHandle(forWritingTo: output)
         defer { try? handle.close() }
@@ -229,9 +229,9 @@ public enum Engine {
         process.standardError = FileHandle.nullDevice
         try process.run()
         process.waitUntilExit()
-        guard process.terminationStatus == 0 else { throw NeedleError.download("cannot extract engine library") }
+        guard process.terminationStatus == 0 else { throw CactusError.download("cannot extract engine library") }
         let size = try output.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
-        guard size > 0, size <= maximumArtifactSize else { throw NeedleError.download("invalid engine library size") }
+        guard size > 0, size <= maximumArtifactSize else { throw CactusError.download("invalid engine library size") }
         return try Data(contentsOf: output)
     }
 }

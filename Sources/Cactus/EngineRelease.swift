@@ -91,7 +91,7 @@ struct EngineRelease: Sendable {
         switch generation {
         case 2: self = .needle2
         case 0, 3: self = .needle3
-        default: throw NeedleError.unsupportedGeneration("unsupported generation \(generation); want 2 or 3")
+        default: throw CactusError.unsupportedGeneration("unsupported generation \(generation); want 2 or 3")
         }
     }
 
@@ -111,7 +111,7 @@ struct EngineRelease: Sendable {
 
     func library(platform: Engine.Platform) throws -> EngineArtifact {
         guard let library = libraries[platform] else {
-            throw NeedleError.download("no \(version) engine build for \(platform.rawValue)")
+            throw CactusError.download("no \(version) engine build for \(platform.rawValue)")
         }
         return library
     }

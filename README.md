@@ -1,8 +1,8 @@
-# needle-swift
+# cactus-swift
 
-Swift library for the Cactus [Needle 2](https://huggingface.co/Cactus-Compute/needle2)
-and [Needle 3](https://huggingface.co/Cactus-Compute/needle3) on-device tool-calling
-models.
+Community-maintained Swift library for running
+[Cactus](https://github.com/cactus-compute/cactus) on-device models: Needle
+tool calling and Whistle speech.
 
 It provides:
 
@@ -23,17 +23,17 @@ Requires **Swift 6.3+ and macOS 13+** (Apple Silicon or Intel). This initial ver
 supports macOS desktop processes. Linux, Windows, iOS, and sandboxed App Store
 distribution are not supported.
 
-Add `https://github.com/zbiljic/needle-swift` in Xcode using the `main` branch,
+Add `https://github.com/zbiljic/cactus-swift` in Xcode using the `main` branch,
 or add it to your `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/zbiljic/needle-swift.git", branch: "main"),
+    .package(url: "https://github.com/zbiljic/cactus-swift.git", branch: "main"),
 ],
 targets: [
     .executableTarget(
         name: "MyApp",
-        dependencies: [.product(name: "Needle", package: "needle-swift")]
+        dependencies: [.product(name: "Cactus", package: "cactus-swift")]
     ),
 ]
 ```
@@ -41,7 +41,7 @@ targets: [
 ## Quick Start
 
 ```swift
-import Needle
+import Cactus
 
 struct WeatherArguments: Codable, Sendable {
     let city: String
@@ -99,7 +99,7 @@ engine validation warnings automatically; call `validate()` before acting on
 the arguments.
 
 `run` checks each response before executing its calls. If the engine flags
-negation or ungrounded fields, it throws `NeedleError.validation(response)`.
+negation or ungrounded fields, it throws `CactusError.validation(response)`.
 The error includes results from earlier completed rounds; those actions are
 not undone. Unflagged output still needs application validation.
 
@@ -142,7 +142,7 @@ queries.
 ## Closing
 
 `close` releases an agent's native binding; later calls throw
-`NeedleError.closed`. The engine and loaded weights stay in the process for
+`CactusError.closed`. The engine and loaded weights stay in the process for
 other agents. `Whistle` has the same `close`, which also ends an open stream.
 
 ## Text embeddings
@@ -223,7 +223,7 @@ in a process. Legacy completion ABIs remain supported; incomplete modern
 capability sets are rejected before inference. Engines exposing
 `needle_last_error` include native failure details, such as context limits.
 
-Default caches are `~/.cache/cactus-needle/<engine-version>/<platform>/`. A custom
+Default caches are `~/.cache/cactus-swift/<engine-version>/<platform>/`. A custom
 `cacheDirectory` is the exact destination directory. Needle 2 uses
 `libneedle.dylib`; Needle 3 uses `libneedle3.dylib`, so both can share a custom
 directory for one platform.
@@ -235,7 +235,7 @@ verify checksums or check for base weights.
 
 ## Errors
 
-Every failure is a `NeedleError`. Match its cases instead of its text:
+Every failure is a `CactusError`. Match its cases instead of its text:
 `invalidInput`, `unsupportedGeneration`, `unsupportedABI`, `embeddingUnsupported`,
 `speechUnsupported`, `streamActive`, `closed`, `download`, `native`, and
 `validation` (also thrown by `run`).

@@ -1,5 +1,5 @@
+@testable import Cactus
 import Foundation
-@testable import Needle
 import Testing
 
 private final class StubProtocol: URLProtocol, @unchecked Sendable {
@@ -42,7 +42,7 @@ func verifiesDownloadsAndRejectsHTTPSizeAndHashErrors() async throws {
     #expect(try await Engine.downloadAttempt(URLRequest(url: url), checksum: checksum, session: session) == payload)
     for path in ["status", "oversize", "checksum"] {
         let url = try #require(URL(string: "https://needle.test/\(path)"))
-        await #expect(throws: NeedleError.self) {
+        await #expect(throws: CactusError.self) {
             try await Engine.downloadAttempt(
                 URLRequest(url: url), checksum: path == "checksum" ? "wrong" : checksum, session: session
             )
@@ -71,7 +71,7 @@ func cacheIntegrityAndFailedDownloadPreserveExistingLibrary() async throws {
     configuration.protocolClasses = [StubProtocol.self]
     let session = URLSession(configuration: configuration)
     defer { session.invalidateAndCancel() }
-    await #expect(throws: NeedleError.self) {
+    await #expect(throws: CactusError.self) {
         try await Engine.fetch(generation: 2, cacheDirectory: directory, session: session)
     }
     #expect(try Data(contentsOf: target) == Data("modified".utf8))
@@ -121,7 +121,7 @@ func downloadsAndVerifiesBaseWeightsAndIsolatesGenerationCaches() async throws {
     let cached = EngineArtifact(name: artifact.name, url: "invalid", checksum: artifact.checksum)
     #expect(try await Engine.download(artifact: cached, directory: directory, session: session) == target)
     let bad = EngineArtifact(name: artifact.name, url: artifact.url, checksum: "wrong")
-    await #expect(throws: NeedleError.self) {
+    await #expect(throws: CactusError.self) {
         try await Engine.download(artifact: bad, directory: directory, session: session)
     }
     #expect(try Data(contentsOf: target) == payload)
@@ -148,8 +148,8 @@ func downloadsAndVerifiesBaseWeightsAndIsolatesGenerationCaches() async throws {
     #expect(try EngineRelease.whistle.library(platform: .current).url == EngineRelease(3).library(platform: .current)
         .url)
     for generation in [-1, 1, 4] {
-        #expect(throws: NeedleError.self) { try Engine.cached(generation: generation) }
-        await #expect(throws: NeedleError.self) { try await Engine.fetch(generation: generation) }
+        #expect(throws: CactusError.self) { try Engine.cached(generation: generation) }
+        await #expect(throws: CactusError.self) { try await Engine.fetch(generation: generation) }
     }
 }
 

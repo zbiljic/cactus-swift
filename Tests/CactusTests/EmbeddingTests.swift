@@ -1,5 +1,5 @@
+@testable import Cactus
 import Foundation
-@testable import Needle
 import Testing
 
 @Test
@@ -21,18 +21,18 @@ func embeddingBoundsErrorsAndStatelessContext() async throws {
     try await runtime.initialize(session, library: library)
     #expect(try await runtime.embed(session, text: "hello") == [0.5, -0.5])
     #expect(fake.snapshot.resets == 0)
-    await #expect(throws: NeedleError.self) { try await runtime.embed(session, text: "bad\0input") }
+    await #expect(throws: CactusError.self) { try await runtime.embed(session, text: "bad\0input") }
     let legacy = try Session(Configuration(generation: 2))
-    await #expect(throws: NeedleError.self) { try await runtime.embed(legacy, text: "hello") }
+    await #expect(throws: CactusError.self) { try await runtime.embed(legacy, text: "hello") }
     let missing = NativeRuntime(api: fake.api)
     try await missing.initialize(session, library: library)
-    await #expect(throws: NeedleError.self) { try await missing.embed(session, text: "hello") }
+    await #expect(throws: CactusError.self) { try await missing.embed(session, text: "hello") }
     for (size, result): (Int32, Int32) in [(0, 0), (-1, 0), (1 << 20 + 1, 0), (2, -2), (2, 1)] {
         api.embed = { _, buffer in buffer.isEmpty ? size : result }
         api.lastError = { "embedding failed" }
         let runtime = NativeRuntime(api: api)
         try await runtime.initialize(session, library: library)
-        await #expect(throws: NeedleError.self) { try await runtime.embed(session, text: "hello") }
+        await #expect(throws: CactusError.self) { try await runtime.embed(session, text: "hello") }
     }
     api.embed = { _, buffer in
         #expect(buffer.isEmpty)

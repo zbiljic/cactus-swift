@@ -68,14 +68,14 @@ public struct Response: Codable, Sendable, Equatable {
     /// Unflagged output still requires application-specific validation.
     public func validate() throws {
         if validation?.negation == true || !(validation?.ungrounded ?? []).isEmpty {
-            throw NeedleError.validation(self)
+            throw CactusError.validation(self)
         }
     }
 
     /// Decodes exactly one call's arguments. Call `validate()` before acting on them.
     public func extract<Value: Decodable>(_ type: Value.Type = Value.self) throws -> Value {
         guard self.type == "call", let calls = functionCalls, calls.count == 1 else {
-            throw NeedleError.invalidInput("extract requires exactly one function call")
+            throw CactusError.invalidInput("extract requires exactly one function call")
         }
         return try (calls[0].arguments ?? .null).decode(type)
     }

@@ -14,13 +14,13 @@ public struct AudioOptions: Sendable, Equatable {
 
     func validate(_ pcm: [Float]) throws {
         guard pcm.count <= Int(Int32.max) else {
-            throw NeedleError.invalidInput("audio has \(pcm.count) samples; want at most \(Int32.max)")
+            throw CactusError.invalidInput("audio has \(pcm.count) samples; want at most \(Int32.max)")
         }
         guard pcm.allSatisfy({ $0.isFinite && (-1 ... 1).contains($0) }) else {
-            throw NeedleError.invalidInput("PCM samples must be finite values in [-1, 1]")
+            throw CactusError.invalidInput("PCM samples must be finite values in [-1, 1]")
         }
         guard ["", "en", "de", "fr", "es", "it", "nl", "pl"].contains(language) else {
-            throw NeedleError.invalidInput("unsupported speech language \(language)")
+            throw CactusError.invalidInput("unsupported speech language \(language)")
         }
         try validateCString(keywords.joined(separator: "\n"), name: "speech keywords")
     }
@@ -96,7 +96,7 @@ public final class Whistle: Sendable {
     init(configuration: WhistleConfiguration, runtime: NativeRuntime?) async throws {
         try Task.checkCancellation()
         guard (2 ... Int(Int32.max)).contains(configuration.bufferSize) else {
-            throw NeedleError.invalidInput("invalid buffer size \(configuration.bufferSize)")
+            throw CactusError.invalidInput("invalid buffer size \(configuration.bufferSize)")
         }
         try validateCString(configuration.weightsPath ?? "", name: "speech weights path")
         let library = try await Engine.resolveLibrary(
@@ -130,7 +130,7 @@ public final class Whistle: Sendable {
     ) async throws -> Response {
         try Task.checkCancellation()
         guard agent.session.generation == 3, agent.runtime === runtime else {
-            throw NeedleError.invalidInput("audio completion requires a Needle 3 agent sharing the speech engine")
+            throw CactusError.invalidInput("audio completion requires a Needle 3 agent sharing the speech engine")
         }
         let tokens = try Agent.tokens(maxNewTokens)
         try options.validate(pcm)
@@ -152,7 +152,7 @@ public final class Whistle: Sendable {
     }
 
     /// Ends an open stream of this Whistle and releases its binding. Later calls
-    /// throw `NeedleError.closed`. Loaded speech weights stay in the engine for
+    /// throw `CactusError.closed`. Loaded speech weights stay in the engine for
     /// other Whistle values.
     public func close() async {
         await runtime.closeSpeech(session)

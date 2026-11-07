@@ -1,9 +1,9 @@
+@testable import Cactus
 import Foundation
-@testable import Needle
 import Testing
 
 private func isStreamActive(_ error: any Error) -> Bool {
-    if case .streamActive = error as? NeedleError {
+    if case .streamActive = error as? CactusError {
         true
     } else {
         false
@@ -11,7 +11,7 @@ private func isStreamActive(_ error: any Error) -> Bool {
 }
 
 private func isClosed(_ error: any Error) -> Bool {
-    if case .closed = error as? NeedleError {
+    if case .closed = error as? CactusError {
         true
     } else {
         false
@@ -19,11 +19,11 @@ private func isClosed(_ error: any Error) -> Bool {
 }
 
 private func isStopped(_ error: any Error) -> Bool {
-    error.localizedDescription == "needle: stream is stopped"
+    error.localizedDescription == "cactus: stream is stopped"
 }
 
 private func isSpeechUnsupported(_ error: any Error) -> Bool {
-    if case .speechUnsupported = error as? NeedleError {
+    if case .speechUnsupported = error as? CactusError {
         true
     } else {
         false
@@ -107,7 +107,7 @@ func streamFailureEndsStream(mode: String) async throws {
     defer { fixture.cleanup() }
     let live = try fixture.speech.stream()
     await #expect { try await live.process([]) } throws: { error in
-        if case .nativeFailure(operation: "stream", code: -3, detail: "cleared") = error as? NeedleError {
+        if case .nativeFailure(operation: "stream", code: -3, detail: "cleared") = error as? CactusError {
             return mode == "error"
         }
         return mode == "malformed" && error is DecodingError
@@ -127,7 +127,7 @@ func streamRejectsInvalidInputAndOlderEngines() async throws {
     }
     defer { older.cleanup() }
     for options in [AudioOptions(language: "sr"), AudioOptions(keywords: ["Ada\0"])] {
-        #expect(throws: NeedleError.self) { try older.speech.stream(options: options) }
+        #expect(throws: CactusError.self) { try older.speech.stream(options: options) }
     }
     // Engine 3.1 has speech without streaming.
     let unsupported = try older.speech.stream()
@@ -138,7 +138,7 @@ func streamRejectsInvalidInputAndOlderEngines() async throws {
     defer { fixture.cleanup() }
     let live = try fixture.speech.stream()
     for pcm: [Float] in [[.nan], [1.5]] {
-        await #expect(throws: NeedleError.self) { try await live.process(pcm) }
+        await #expect(throws: CactusError.self) { try await live.process(pcm) }
     }
     let cancelledProcess = Task {
         withUnsafeCurrentTask { $0?.cancel() }

@@ -1,5 +1,5 @@
+@testable import Cactus
 import Foundation
-@testable import Needle
 import Testing
 
 // swiftlint:disable:next cyclomatic_complexity
@@ -144,7 +144,7 @@ func confidenceUsesLoadedBytesAndRejectsWrongKind(calibrated: Bool) async throws
     for data in [testWeights(speech: true), Data([0x84, 0x2A, 0xE1, 0x05])] {
         try data.write(to: badPath)
         let wrong = try Session(Configuration(weightsPath: badPath.path))
-        await #expect(throws: NeedleError.self) { try await runtime.initialize(wrong, library: library) }
+        await #expect(throws: CactusError.self) { try await runtime.initialize(wrong, library: library) }
     }
     #expect(fake.snapshot.loads == 3)
 }

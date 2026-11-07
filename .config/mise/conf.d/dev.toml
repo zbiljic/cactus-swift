@@ -26,7 +26,7 @@ run = "swift test"
 
 [tasks."test:native"]
 description = "Test both pinned engines, text embeddings and Whistle speech"
-env.NEEDLE_NATIVE_TEST = "1"
+env.CACTUS_NATIVE_TEST = "1"
 run = "swift test --filter NativeIntegrationTests"
 
 [tasks.check]

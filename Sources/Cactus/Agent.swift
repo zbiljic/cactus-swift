@@ -83,20 +83,20 @@ public final class Agent: Sendable {
     static func tokens(_ maxNewTokens: Int) throws -> Int32 {
         let tokens = maxNewTokens == 0 ? defaultMaxNewTokens : maxNewTokens
         guard tokens > 0, tokens <= Int(Int32.max) else {
-            throw NeedleError.invalidInput("invalid max new tokens \(maxNewTokens)")
+            throw CactusError.invalidInput("invalid max new tokens \(maxNewTokens)")
         }
         return Int32(tokens)
     }
 
     /// Runs up to `maxSteps` tool rounds. A validation error carries the rejected
-    /// response and results of earlier rounds in `NeedleError.validation`.
+    /// response and results of earlier rounds in `CactusError.validation`.
     public func run(
         _ query: String,
         maxSteps: Int = defaultMaxSteps,
         maxNewTokens: Int = defaultMaxNewTokens
     ) async throws -> Response {
         let steps = maxSteps == 0 ? Self.defaultMaxSteps : maxSteps
-        guard steps > 0 else { throw NeedleError.invalidInput("invalid max steps \(maxSteps)") }
+        guard steps > 0 else { throw CactusError.invalidInput("invalid max steps \(maxSteps)") }
         var response = try await complete(query, maxNewTokens: maxNewTokens)
         var executed: [JSONValue] = []
         response.results = executed
@@ -126,7 +126,7 @@ public final class Agent: Sendable {
         try await runtime.reset(session)
     }
 
-    /// Releases the agent's native binding. Later calls throw `NeedleError.closed`.
+    /// Releases the agent's native binding. Later calls throw `CactusError.closed`.
     /// The engine and loaded weights stay in the process for other agents.
     public func close() async {
         await runtime.close(session)
@@ -170,11 +170,11 @@ struct Session: Sendable {
         var seen: Set<String> = []
         for tool in config.tools {
             guard !tool.schema.name.isEmpty, seen.insert(tool.schema.name).inserted else {
-                throw NeedleError.invalidInput("empty or duplicate tool name: \(tool.schema.name)")
+                throw CactusError.invalidInput("empty or duplicate tool name: \(tool.schema.name)")
             }
         }
         guard (2 ... Int(Int32.max)).contains(config.bufferSize) else {
-            throw NeedleError.invalidInput("invalid buffer size \(config.bufferSize)")
+            throw CactusError.invalidInput("invalid buffer size \(config.bufferSize)")
         }
         try validateCString(config.system, name: "system")
         try validateCString(config.toolIndexPath ?? "", name: "tool index path")
@@ -192,5 +192,5 @@ struct Session: Sendable {
 }
 
 func validateCString(_ value: String, name: String) throws {
-    guard !value.utf8.contains(0) else { throw NeedleError.invalidInput("\(name) contains NUL") }
+    guard !value.utf8.contains(0) else { throw CactusError.invalidInput("\(name) contains NUL") }
 }

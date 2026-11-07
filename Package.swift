@@ -3,11 +3,11 @@
 import PackageDescription
 
 let package = Package(
-    name: "needle-swift",
+    name: "cactus-swift",
     platforms: [.macOS(.v13)],
-    products: [.library(name: "Needle", targets: ["Needle"])],
+    products: [.library(name: "Cactus", targets: ["Cactus"])],
     targets: [
-        .target(name: "Needle"),
-        .testTarget(name: "NeedleTests", dependencies: ["Needle"]),
+        .target(name: "Cactus"),
+        .testTarget(name: "CactusTests", dependencies: ["Cactus"]),
     ]
 )

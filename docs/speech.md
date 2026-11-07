@@ -8,7 +8,7 @@ transcription does not require text weights.
 ## Transcription
 
 ```swift
-import Needle
+import Cactus
 
 let speech = try await Whistle()
 let pcm: [Float] = [] // Replace with your 16 kHz mono samples.
@@ -47,9 +47,9 @@ let tail = try await live.stop()
 
 The engine holds one stream per process. While a stream is open, other speech
 calls, a second stream, and loading different speech weights throw
-`NeedleError.streamActive`; a failed `process` ends the stream, and `close` on
+`CactusError.streamActive`; a failed `process` ends the stream, and `close` on
 its Whistle ends it too. Streaming needs engine 3.2 or newer; older libraries
-throw `NeedleError.speechUnsupported`.
+throw `CactusError.speechUnsupported`.
 
 ## Audio tool calling
 

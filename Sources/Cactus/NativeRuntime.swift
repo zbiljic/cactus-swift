@@ -48,7 +48,7 @@ struct NativeAPI: Sendable {
 
     static func open(_ path: String) throws -> Self {
         guard let handle = dlopen(path, RTLD_NOW | RTLD_LOCAL) else {
-            throw NeedleError.native("load library: \(String(cString: dlerror()))")
+            throw CactusError.native("load library: \(String(cString: dlerror()))")
         }
         do {
             // The engine owns process-global pointers; keep it mapped for process lifetime.
@@ -61,14 +61,14 @@ struct NativeAPI: Sendable {
 
     static func bind(resolve: (String) -> UnsafeMutableRawPointer?) throws -> Self {
         func symbol<T>(_ name: String, as _: T.Type) throws -> T {
-            guard let address = resolve(name) else { throw NeedleError.native("missing symbol \(name)") }
+            guard let address = resolve(name) else { throw CactusError.native("missing symbol \(name)") }
             return unsafeBitCast(address, to: T.self)
         }
         let capabilities = ["needle_models", "needle_transcribe", "needle_set_audio"]
         let modern = capabilities.contains { resolve($0) != nil }
         if modern {
             for name in capabilities + ["needle_last_error", "needle_embed"] where resolve(name) == nil {
-                throw NeedleError.unsupportedABI(missing: name)
+                throw CactusError.unsupportedABI(missing: name)
             }
         }
         let initialize = try symbol("needle_init", as: Initialize.self)
@@ -108,7 +108,7 @@ struct NativeAPI: Sendable {
             let stop = resolve("needle_stream_transcribe_stop")
             if (process == nil) != (stop == nil) {
                 let missing = process == nil ? "needle_stream_transcribe_process" : "needle_stream_transcribe_stop"
-                throw NeedleError.unsupportedABI(missing: missing)
+                throw CactusError.unsupportedABI(missing: missing)
             }
             if let process, let stop {
                 api.bindStream(
@@ -166,12 +166,12 @@ struct NativeAPI: Sendable {
         guard code >= 0 else {
             throw failure(operation, code: code, fallback: String(decoding: bytes, as: UTF8.self))
         }
-        guard end != nil else { throw NeedleError.native("engine response exceeds buffer") }
+        guard end != nil else { throw CactusError.native("engine response exceeds buffer") }
         return Data(bytes)
     }
 
     /// Read the process-global error before any other native call can replace it.
-    func failure(_ operation: String, code: Int32, fallback: String = "") -> NeedleError {
+    func failure(_ operation: String, code: Int32, fallback: String = "") -> CactusError {
         let diagnostic = (lastError?() ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         let detail = diagnostic.isEmpty ? fallback.trimmingCharacters(in: .whitespacesAndNewlines) : diagnostic
         return .nativeFailure(operation: operation, code: code, detail: detail)
@@ -219,7 +219,7 @@ actor NativeRuntime {
         try Task.checkCancellation()
         let path = library.standardizedFileURL.path
         if let libraryPath, libraryPath != path {
-            throw NeedleError.native("engine already loaded from \(libraryPath)")
+            throw CactusError.native("engine already loaded from \(libraryPath)")
         }
         if api == nil {
             api = try NativeAPI.open(path)
@@ -242,7 +242,7 @@ actor NativeRuntime {
 
     private func decodeResponse(_ session: Session, api: NativeAPI, code: Int32, buffer: [CChar]) throws -> Response {
         var response = try JSONDecoder().decode(Response.self, from: api.output("complete", code: code, buffer: buffer))
-        guard !response.type.isEmpty else { throw NeedleError.native("response type is empty") }
+        guard !response.type.isEmpty else { throw CactusError.native("response type is empty") }
         if session.tuned, !calibratedWeights {
             response.confidence = nil
         }
@@ -254,7 +254,7 @@ actor NativeRuntime {
         try bind(session).reset()
     }
 
-    /// Releases a text session; later calls throw `NeedleError.closed`. The next
+    /// Releases a text session; later calls throw `CactusError.closed`. The next
     /// agent reinitializes the engine.
     func close(_ session: Session) {
         closedSessions.insert(session.id)
@@ -263,7 +263,7 @@ actor NativeRuntime {
         }
     }
 
-    /// Ends the session's open stream and releases the session; later calls throw `NeedleError.closed`.
+    /// Ends the session's open stream and releases the session; later calls throw `CactusError.closed`.
     func closeSpeech(_ session: SpeechSession) {
         if let openStream, openStream.speech.id == session.id {
             endStream(openStream)
@@ -274,23 +274,23 @@ actor NativeRuntime {
 
     func embed(_ session: Session, text: String) throws -> [Float] {
         try Task.checkCancellation()
-        guard session.generation == 3 else { throw NeedleError.embeddingUnsupported("embeddings require Needle 3") }
+        guard session.generation == 3 else { throw CactusError.embeddingUnsupported("embeddings require Needle 3") }
         try validateCString(text, name: "input")
         let api = try bind(session)
         guard let embed = api.embed else {
-            throw NeedleError.embeddingUnsupported("engine does not support embeddings")
+            throw CactusError.embeddingUnsupported("engine does not support embeddings")
         }
         let size = embed(text, UnsafeMutableBufferPointer(start: nil, count: 0))
         guard size >= 0 else { throw api.failure("embed size", code: size) }
         guard
             size > 0,
-            size <= Self.maxEmbeddingFloats else { throw NeedleError.native("invalid embedding size \(size)") }
+            size <= Self.maxEmbeddingFloats else { throw CactusError.native("invalid embedding size \(size)") }
         try Task.checkCancellation()
         var output = [Float](repeating: 0, count: Int(size))
         let code = output.withUnsafeMutableBufferPointer { embed(text, $0) }
         try Task.checkCancellation()
         guard code >= 0 else { throw api.failure("embed", code: code) }
-        guard code == size else { throw NeedleError.native("embedding length \(code), want \(size)") }
+        guard code == size else { throw CactusError.native("embedding length \(code), want \(size)") }
         return output
     }
 
@@ -302,15 +302,15 @@ actor NativeRuntime {
     @discardableResult
     private func bindSpeech(_ session: SpeechSession) throws -> NativeAPI {
         guard let api, api.transcribe != nil, api.setAudio != nil, api.completeAudio != nil else {
-            throw NeedleError.speechUnsupported("engine does not support speech; use Needle 3.1 or newer")
+            throw CactusError.speechUnsupported("engine does not support speech; use Needle 3.1 or newer")
         }
-        guard !closedSessions.contains(session.id) else { throw NeedleError.closed }
+        guard !closedSessions.contains(session.id) else { throw CactusError.closed }
         if speechWeights != session.weightsPath {
             // Switching speech weights would discard the open stream.
-            guard openStream == nil else { throw NeedleError.streamActive }
+            guard openStream == nil else { throw CactusError.streamActive }
             let data = try Data(contentsOf: URL(fileURLWithPath: session.weightsPath))
             guard WeightMetadata(data)?.kind == .speech else {
-                throw NeedleError.invalidInput("weights are not a recognized speech model")
+                throw CactusError.invalidInput("weights are not a recognized speech model")
             }
             let blob = NSData(data: data)
             let code = api.load(blob.bytes, UInt64(blob.length))
@@ -326,10 +326,10 @@ actor NativeRuntime {
 
     func transcribe(_ session: SpeechSession, pcm: [Float], options: AudioOptions) throws -> Transcript {
         try Task.checkCancellation()
-        guard openStream == nil else { throw NeedleError.streamActive }
+        guard openStream == nil else { throw CactusError.streamActive }
         let api = try bindSpeech(session)
         guard let transcribe = api.transcribe else {
-            throw NeedleError.speechUnsupported("engine does not support speech")
+            throw CactusError.speechUnsupported("engine does not support speech")
         }
         var buffer = [CChar](repeating: 0, count: session.outputCapacity(samples: pcm.count))
         let samples = pcm.isEmpty ? [Float(0)] : pcm
@@ -346,11 +346,11 @@ actor NativeRuntime {
         _ session: SpeechSession, text: Session, pcm: [Float], options: AudioOptions, tokens: Int32
     ) throws -> Response {
         try Task.checkCancellation()
-        guard openStream == nil else { throw NeedleError.streamActive }
+        guard openStream == nil else { throw CactusError.streamActive }
         let api = try bindSpeech(session)
         try bind(text)
         guard let complete = api.completeAudio, let setAudio = api.setAudio else {
-            throw NeedleError.speechUnsupported("engine does not support speech")
+            throw CactusError.speechUnsupported("engine does not support speech")
         }
         if text.stateless {
             api.reset()
@@ -405,7 +405,7 @@ actor NativeRuntime {
         }
     }
 
-    private static let streamingUnsupported = NeedleError
+    private static let streamingUnsupported = CactusError
         .speechUnsupported("engine does not support live transcription; use Needle 3.2 or newer")
 
     /// Checks that this stream may use the engine.
@@ -414,7 +414,7 @@ actor NativeRuntime {
             throw StreamFailure(TranscriptionStream.stoppedError)
         }
         if let openStream, openStream.id != stream.id {
-            throw NeedleError.streamActive
+            throw CactusError.streamActive
         }
         let api = try bindSpeech(stream.speech)
         guard let process = api.streamProcess, api.streamStop != nil else { throw Self.streamingUnsupported }
@@ -439,24 +439,24 @@ actor NativeRuntime {
 
     @discardableResult
     private func bind(_ session: Session) throws -> NativeAPI {
-        guard let api else { throw NeedleError.native("engine is not loaded") }
-        guard !closedSessions.contains(session.id) else { throw NeedleError.closed }
+        guard let api else { throw CactusError.native("engine is not loaded") }
+        guard !closedSessions.contains(session.id) else { throw CactusError.closed }
         if activeID == session.id {
             return api
         }
         if session.weightsPath == nil, activeWeights != nil {
-            throw NeedleError.native("tuned weights cannot be unloaded; use a separate process for the base model")
+            throw CactusError.native("tuned weights cannot be unloaded; use a separate process for the base model")
         }
         if let path = session.weightsPath, path != activeWeights {
             let data = try Data(contentsOf: URL(fileURLWithPath: path))
             let generation = try Self.weightsGeneration(data)
             guard generation == session.generation else {
-                throw NeedleError
+                throw CactusError
                     .invalidInput("weights generation changed: got \(generation), want \(session.generation)")
             }
             let metadata = WeightMetadata(data)
             guard generation != 3 || metadata?.kind == .text else {
-                throw NeedleError.invalidInput("weights are not a recognized text model")
+                throw CactusError.invalidInput("weights are not a recognized text model")
             }
             let blob = NSData(data: data)
             let code = api.load(blob.bytes, UInt64(blob.length))
@@ -483,12 +483,12 @@ actor NativeRuntime {
     }
 
     static func weightsGeneration(_ data: Data) throws -> Int {
-        guard data.count >= 4 else { throw NeedleError.invalidInput("weights header is truncated") }
+        guard data.count >= 4 else { throw CactusError.invalidInput("weights header is truncated") }
         let tag = data.prefix(4).enumerated().reduce(UInt32(0)) { $0 | UInt32($1.element) << ($1.offset * 8) }
         switch tag {
         case Cact.needle2Tag: return 2
         case Cact.needle3Tag: return 3
-        default: throw NeedleError.invalidInput("unknown weights header 0x\(String(tag, radix: 16))")
+        default: throw CactusError.invalidInput("unknown weights header 0x\(String(tag, radix: 16))")
         }
     }
 }

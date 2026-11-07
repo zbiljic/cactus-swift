@@ -1,5 +1,5 @@
+@testable import Cactus
 import Foundation
-@testable import Needle
 import Testing
 
 func address(_ function: some Any) -> UnsafeMutableRawPointer {
@@ -86,7 +86,7 @@ func nativeCompletionABI(modern: Bool) throws {
     #expect(buffer[0] == 65)
     #expect(api.lastError?() == (modern ? "native detail" : nil))
     #expect(api.failure("test", code: -2, fallback: "buffer").localizedDescription
-        == "needle: test failed with code -2: \(modern ? "native detail" : "buffer")")
+        == "cactus: test failed with code -2: \(modern ? "native detail" : "buffer")")
     #expect(api.embed?("hello", UnsafeMutableBufferPointer(start: nil, count: 0)) == 2)
     var vector = [Float](repeating: 0, count: 2)
     #expect(vector.withUnsafeMutableBufferPointer { api.embed?("hello", $0) } == 2)
@@ -96,7 +96,7 @@ func nativeCompletionABI(modern: Bool) throws {
         if name == "needle_embed", !modern {
             #expect(try NativeAPI.bind { symbols[$0] }.embed == nil)
         } else {
-            #expect(throws: NeedleError.self) { try NativeAPI.bind { symbols[$0] } }
+            #expect(throws: CactusError.self) { try NativeAPI.bind { symbols[$0] } }
         }
         symbols[name] = removed
     }
@@ -116,8 +116,8 @@ func nativeDiagnosticFallbacks() {
     var api = NativeAPI(initialize: { _, _, _ in 0 }, complete: { _, _, _ in 0 }, reset: {}, load: { _, _ in 0 })
     for detail: String? in [nil, "", " \n"] {
         api.lastError = { detail }
-        #expect(api.failure("load", code: -1).localizedDescription == "needle: load failed with code -1")
+        #expect(api.failure("load", code: -1).localizedDescription == "cactus: load failed with code -1")
         #expect(api.failure("complete", code: -1, fallback: " buffer \n").localizedDescription
-            == "needle: complete failed with code -1: buffer")
+            == "cactus: complete failed with code -1: buffer")
     }
 }

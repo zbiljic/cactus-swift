@@ -1,5 +1,5 @@
+@testable import Cactus
 import Foundation
-@testable import Needle
 import Testing
 
 final class SpeechProbe: @unchecked Sendable {
@@ -147,9 +147,9 @@ func speechPreservesTextAndRejectsWrongKind() async throws {
     #expect(probe.text.snapshot.systems.count == 1)
     #expect(probe.text.snapshot.loads == 4)
     other.weightsPath = agent.session.weightsPath
-    await #expect(throws: NeedleError.self) { try await Whistle(configuration: other, runtime: runtime) }
+    await #expect(throws: CactusError.self) { try await Whistle(configuration: other, runtime: runtime) }
     let wrong = try Session(Configuration(weightsPath: speech.session.weightsPath))
-    await #expect(throws: NeedleError.self) {
+    await #expect(throws: CactusError.self) {
         try await runtime.initialize(wrong, library: URL(fileURLWithPath: "/test/libneedle.dylib"))
     }
     #expect(probe.text.snapshot.loads == 4)
@@ -172,19 +172,19 @@ func speechInputValidationPrecedesNativeCalls() async throws {
         [1.01],
         [-1.01],
     ] {
-        await #expect(throws: NeedleError.self) { try await speech.transcribe(pcm) }
+        await #expect(throws: CactusError.self) { try await speech.transcribe(pcm) }
     }
     for options in [AudioOptions(language: "xx"), AudioOptions(keywords: ["bad\0value"])] {
-        await #expect(throws: NeedleError.self) { try await speech.transcribe([], options: options) }
+        await #expect(throws: CactusError.self) { try await speech.transcribe([], options: options) }
     }
     for size in [0, 1, Int(Int32.max) + 1] {
         var invalid = config
         invalid.bufferSize = size
-        await #expect(throws: NeedleError.self) { try await Whistle(configuration: invalid, runtime: runtime) }
+        await #expect(throws: CactusError.self) { try await Whistle(configuration: invalid, runtime: runtime) }
     }
     let legacy = try await probe.text.agent()
-    await #expect(throws: NeedleError.self) { try await speech.complete([], agent: legacy) }
-    await #expect(throws: NeedleError.self) {
+    await #expect(throws: CactusError.self) { try await speech.complete([], agent: legacy) }
+    await #expect(throws: CactusError.self) {
         try await Whistle(configuration: config, runtime: NativeRuntime(api: probe.text.api))
     }
     let cancelled = Task {
@@ -213,7 +213,7 @@ func audioCleanupSurvivesFailures(mode: String) async throws {
         ), runtime: runtime
     )
     for tokens in [-1, Int(Int32.max) + 1] {
-        await #expect(throws: NeedleError.self) { try await speech.complete([], agent: agent, maxNewTokens: tokens) }
+        await #expect(throws: CactusError.self) { try await speech.complete([], agent: agent, maxNewTokens: tokens) }
     }
     #expect(probe.callCount == 0)
     let task = Task { try await speech.complete([], agent: agent, options: AudioOptions(language: "en")) }
@@ -309,10 +309,10 @@ extension NativeIntegrationTests {
             #expect(response.audioText?.isEmpty == true && response.audioLanguage != nil)
             #expect(response.audioTTFTMS != nil && response.audioDecodeTPS != nil)
         }
-        await #expect(throws: NeedleError.self) {
+        await #expect(throws: CactusError.self) {
             try await Agent(configuration: Configuration(weightsPath: speech.session.weightsPath))
         }
-        await #expect(throws: NeedleError.self) {
+        await #expect(throws: CactusError.self) {
             try await Whistle(configuration: WhistleConfiguration(weightsPath: agent.session.weightsPath))
         }
         let other = try await Agent(configuration: Configuration(system: "device: test"))
@@ -325,7 +325,7 @@ extension NativeIntegrationTests {
             #expect(step.text.isEmpty && step.received > 0)
         }
         await #expect { try await speech.transcribe([]) } throws: {
-            $0.localizedDescription == NeedleError.streamActive.localizedDescription
+            $0.localizedDescription == CactusError.streamActive.localizedDescription
         }
         let tail = try await live.stop()
         #expect(tail.text.isEmpty && tail.pending.isEmpty)

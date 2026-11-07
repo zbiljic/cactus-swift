@@ -2,7 +2,7 @@ import Foundation
 
 /// Errors thrown by this library. Pattern-match the cases to react to a
 /// condition; `localizedDescription` carries the detail.
-public enum NeedleError: Error, LocalizedError, Sendable {
+public enum CactusError: Error, LocalizedError, Sendable {
     /// A caller-supplied value was rejected before reaching the engine.
     case invalidInput(String)
     /// A generation other than 2 or 3, or a feature the selected generation lacks.
@@ -33,20 +33,20 @@ public enum NeedleError: Error, LocalizedError, Sendable {
         case let .invalidInput(message), let .native(message), let .download(message),
              let .unsupportedGeneration(message), let .embeddingUnsupported(message),
              let .speechUnsupported(message):
-            "needle: \(message)"
+            "cactus: \(message)"
         case let .unsupportedABI(missing):
-            "needle: unsupported native ABI: missing \(missing)"
+            "cactus: unsupported native ABI: missing \(missing)"
         case .streamActive:
-            "needle: a live transcription is in progress"
+            "cactus: a live transcription is in progress"
         case .closed:
-            "needle: closed"
+            "cactus: closed"
         case let .nativeFailure(operation, code, detail):
-            "needle: \(operation) failed with code \(code)" + (detail.isEmpty ? "" : ": \(detail)")
+            "cactus: \(operation) failed with code \(code)" + (detail.isEmpty ? "" : ": \(detail)")
         case let .validation(response):
             if response.validation?.negation == true {
-                "needle: response validation: negation detected"
+                "cactus: response validation: negation detected"
             } else {
-                "needle: response validation: ungrounded fields: "
+                "cactus: response validation: ungrounded fields: "
                     + (response.validation?.ungrounded ?? []).joined(separator: ", ")
             }
         }

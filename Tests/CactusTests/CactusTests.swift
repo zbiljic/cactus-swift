@@ -1,5 +1,5 @@
+@testable import Cactus
 import Foundation
-@testable import Needle
 import Testing
 
 private struct WeatherArguments: Codable, Sendable, Equatable {
@@ -94,7 +94,7 @@ func typedToolLoopAndExtraction() async throws {
     let call = try JSONDecoder().decode(Response.self, from: Data(weatherCall.utf8))
     let extracted: WeatherArguments = try call.extract()
     #expect(extracted.city == "Lagos")
-    #expect(throws: NeedleError.self) { try response.extract(WeatherArguments.self) }
+    #expect(throws: CactusError.self) { try response.extract(WeatherArguments.self) }
     try await agent.reset()
     #expect(fake.snapshot.resets == 1)
 }
@@ -122,19 +122,19 @@ func rejectsEntireFlaggedTurnAndKeepsEarlierResults() async throws {
     do {
         _ = try await agent.run("weather")
         Issue.record("Expected validation rejection")
-    } catch let NeedleError.validation(response) {
+    } catch let CactusError.validation(response) {
         #expect(response.results == [.string("Lagos")])
         #expect(response.functionCalls?.count == 2)
         #expect(fake.snapshot.inputs.count == 2)
     }
     #expect(await invocations.value == 1)
     let initial = try await FakeNative([rejected]).agent(tools: [tool])
-    await #expect(throws: NeedleError.self) { try await initial.run("weather") }
+    await #expect(throws: CactusError.self) { try await initial.run("weather") }
     #expect(await invocations.value == 1)
     // Complete and extract deliberately leave validation policy to their caller.
     let raw = try await FakeNative([rejected]).agent()
     #expect(try await raw.complete("weather").validation?.ungrounded == ["get_weather.city"])
-    #expect(throws: NeedleError.self) {
+    #expect(throws: CactusError.self) {
         try Response(type: "respond", validation: Validation(negation: true)).validate()
     }
     try Response(type: "respond").validate()
@@ -145,7 +145,7 @@ func toolFailuresMissingArgumentsAndStepLimit() async throws {
     let call = #"{"type":"call","function_calls":[{"name":"missing"},{"name":"fails","arguments":null}]}"#
     let tool = Tool(schema: ToolSchema(name: "fails")) { (arguments: JSONValue) async throws -> JSONValue in
         #expect(arguments == .object([:]))
-        throw NeedleError.invalidInput("offline")
+        throw CactusError.invalidInput("offline")
     }
     let fake = FakeNative([call, call, finalResponse])
     let agent = try await fake.agent(tools: [tool])
@@ -153,7 +153,7 @@ func toolFailuresMissingArgumentsAndStepLimit() async throws {
     #expect(response.type == "call")
     #expect(response.results == [
         .object(["error": .string("unknown tool: missing")]),
-        .object(["error": .string("needle: offline")]),
+        .object(["error": .string("cactus: offline")]),
     ])
     #expect(fake.snapshot.inputs.count == 2)
 }
@@ -182,10 +182,10 @@ func invalidConfigurationFailsBeforeLoading() throws {
         Configuration(bufferSize: 1),
         Configuration(bufferSize: Int(Int32.max) + 1),
     ] {
-        #expect(throws: NeedleError.self) { try Session(config) }
+        #expect(throws: CactusError.self) { try Session(config) }
     }
-    #expect(throws: NeedleError.self) { try NativeAPI.open("/nonexistent/needle.dylib") }
-    #expect(throws: NeedleError.self) { try NativeAPI.open("/usr/lib/libSystem.B.dylib") }
+    #expect(throws: CactusError.self) { try NativeAPI.open("/nonexistent/needle.dylib") }
+    #expect(throws: CactusError.self) { try NativeAPI.open("/usr/lib/libSystem.B.dylib") }
 }
 
 @Test
@@ -196,16 +196,16 @@ func nativeDiagnosticsAndBufferBoundaries() async throws {
         _ = try await agent.complete("hello")
         Issue.record("Expected native failure")
     } catch {
-        #expect(error.localizedDescription == "needle: complete failed with code -3: native error")
+        #expect(error.localizedDescription == "cactus: complete failed with code -3: native error")
     }
     for output in ["12345678", "invalid", #"{"type":""}"#, #"{"success":true}"#] {
         let invalid = try await FakeNative([output]).agent(bufferSize: output == "12345678" ? 8 : 65536)
         await #expect(throws: (any Error).self) { try await invalid.complete("hello") }
     }
-    await #expect(throws: NeedleError.self) { try await agent.complete("bad\0input") }
-    await #expect(throws: NeedleError.self) { try await agent.complete("hello", maxNewTokens: -1) }
-    await #expect(throws: NeedleError.self) { try await agent.complete("hello", maxNewTokens: Int(Int32.max) + 1) }
-    await #expect(throws: NeedleError.self) { try await agent.run("hello", maxSteps: -1) }
+    await #expect(throws: CactusError.self) { try await agent.complete("bad\0input") }
+    await #expect(throws: CactusError.self) { try await agent.complete("hello", maxNewTokens: -1) }
+    await #expect(throws: CactusError.self) { try await agent.complete("hello", maxNewTokens: Int(Int32.max) + 1) }
+    await #expect(throws: CactusError.self) { try await agent.run("hello", maxSteps: -1) }
     #expect(fake.snapshot.inputs.count == 1)
 }
 
@@ -234,7 +234,7 @@ func rebindingAndTunedWeightSafeguards() async throws {
     let weights = directory.appendingPathComponent("tuned.cact")
     try Data([0x83, 0x2A, 0xE1, 0x05, 1]).write(to: weights)
     for header in [[], [0x83], [1, 2, 3, 4]] as [[UInt8]] {
-        #expect(throws: NeedleError.self) { try NativeRuntime.weightsGeneration(Data(header)) }
+        #expect(throws: CactusError.self) { try NativeRuntime.weightsGeneration(Data(header)) }
     }
     let fake = FakeNative([finalResponse])
     let runtime = NativeRuntime(api: fake.api)
@@ -250,8 +250,8 @@ func rebindingAndTunedWeightSafeguards() async throws {
     let response = try await runtime.complete(tuned, text: "hello", tokens: 32)
     #expect(response.confidence == nil)
     #expect(fake.snapshot.loads == 1)
-    await #expect(throws: NeedleError.self) { try await runtime.reset(base) }
-    await #expect(throws: NeedleError.self) {
+    await #expect(throws: CactusError.self) { try await runtime.reset(base) }
+    await #expect(throws: CactusError.self) {
         try await runtime.initialize(tuned, library: URL(fileURLWithPath: "/other/libneedle.dylib"))
     }
 }
@@ -294,17 +294,17 @@ func generationSelectionOverridesAndWeightReloads() async throws {
             #expect(try await runtime.complete(base, text: "hello", tokens: 512).confidence == 0.94)
             #expect(fake.snapshot.loads == 3)
         } else {
-            await #expect(throws: NeedleError.self) { try await runtime.reset(base) }
+            await #expect(throws: CactusError.self) { try await runtime.reset(base) }
         }
         // Recheck the header at load time, before passing a changed file to native code.
         try Data([generation == 2 ? 0x84 : 0x83, 0x2A, 0xE1, 0x05]).write(to: weights)
         let changed = NativeRuntime(api: fake.api)
         let loads = fake.snapshot.loads
-        await #expect(throws: NeedleError.self) { try await changed.initialize(tuned, library: library) }
+        await #expect(throws: CactusError.self) { try await changed.initialize(tuned, library: library) }
         #expect(fake.snapshot.loads == loads)
         try header.write(to: weights)
         let failed = NativeRuntime(api: FakeNative(loadCode: -7).api)
-        await #expect(throws: NeedleError.self) { try await failed.initialize(tuned, library: library) }
+        await #expect(throws: CactusError.self) { try await failed.initialize(tuned, library: library) }
     }
 }
 
@@ -337,9 +337,9 @@ func statelessResetsOnlyAtRequestBoundaries(stateless: Bool) async throws {
     _ = try await agent.run("last request")
     #expect(fake.snapshot.inputs.count == 4)
     #expect(fake.snapshot.resets == (stateless ? 3 : 0))
-    await #expect(throws: NeedleError.self) { try await agent.complete("bad\0input") }
-    await #expect(throws: NeedleError.self) { try await agent.complete("hello", maxNewTokens: -1) }
-    await #expect(throws: NeedleError.self) { try await agent.run("hello", maxSteps: -1) }
+    await #expect(throws: CactusError.self) { try await agent.complete("bad\0input") }
+    await #expect(throws: CactusError.self) { try await agent.complete("hello", maxNewTokens: -1) }
+    await #expect(throws: CactusError.self) { try await agent.run("hello", maxSteps: -1) }
     let cancelled = Task {
         withUnsafeCurrentTask { $0?.cancel() }
         return try await agent.complete("hello")
@@ -371,7 +371,7 @@ func toolTriggersRoundTripAndReachNativeInitialization() async throws {
     try await NativeRuntime(api: api).initialize(session, library: URL(fileURLWithPath: "/test/libneedle.dylib"))
 }
 
-@Suite(.serialized, .enabled(if: ProcessInfo.processInfo.environment["NEEDLE_NATIVE_TEST"] == "1"))
+@Suite(.serialized, .enabled(if: ProcessInfo.processInfo.environment["CACTUS_NATIVE_TEST"] == "1"))
 struct NativeIntegrationTests {
     @Test
     func nativeEmbeddingsPreserveContinuation() async throws {
