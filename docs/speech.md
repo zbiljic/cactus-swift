@@ -70,8 +70,8 @@ through `agent.complete`.
 
 ## Runtime and custom weights
 
-Needle 3 text and speech share the same serialized Cactus engine runtime and
-library path.
+Whistle shares one serialized Cactus engine runtime and library path with the
+other models the engine runs, such as Needle 3 text.
 Loading or switching speech models preserves the active text conversation;
 switching text agents follows the [conversation rules](../README.md#model-generations).
 Audio options are cleared after every audio completion. Task cancellation cannot

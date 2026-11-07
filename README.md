@@ -2,7 +2,7 @@
 
 Community-maintained Swift library for running
 [Cactus](https://github.com/cactus-compute/cactus) on-device models: Needle
-tool calling and Whistle speech.
+tool calling, Whistle speech, and Mirage vision.
 
 It provides:
 
@@ -14,6 +14,7 @@ It provides:
 - structured response extraction
 - Needle 3 text embeddings
 - opt-in Whistle transcription, live streaming, and audio tool calling
+- opt-in Mirage image description, text recognition, and form extraction
 
 > This project is in early development and its API may change.
 
@@ -143,7 +144,8 @@ queries.
 
 `close` releases an agent's native binding; later calls throw
 `CactusError.closed`. The engine and loaded weights stay in the process for
-other agents. `Whistle` has the same `close`, which also ends an open stream.
+other agents. `Whistle` and `Mirage` have the same `close`; a Whistle's also
+ends its open stream.
 
 ## Text embeddings
 
@@ -169,6 +171,28 @@ PCM of any length. Speech weights are downloaded only when requested.
 
 See the [speech guide](docs/speech.md) for the API, supported languages, runtime
 behavior, and offline setup.
+
+## Vision
+
+`Mirage` adds optional image understanding on the Cactus engine:
+
+- `describe` returns the scene, the objects with boxes, masks, and attributes,
+  the recognized text lines, and the relations between objects.
+- `extract` fills an ordered form of choice, count, and text fields.
+
+```swift
+let image = try RGBImage(contentsOf: URL(fileURLWithPath: "photo.png"))
+let vision = try await Mirage()
+let description = try await vision.describe(image)
+```
+
+`RGBImage` wraps packed RGB, converts a `CGImage`, or decodes any format ImageIO
+reads, applying the EXIF orientation of camera photos. Vision weights are
+downloaded only when requested, and loading them keeps the loaded text and
+speech models.
+
+See the [vision guide](docs/vision.md) for options, forms, coordinates, image
+conversion, and offline setup.
 
 ## Model generations
 
@@ -241,8 +265,8 @@ verify checksums or check for base weights.
 
 Every failure is a `CactusError`. Match its cases instead of its text:
 `invalidInput`, `unsupportedGeneration`, `unsupportedABI`, `embeddingUnsupported`,
-`streamActive`, `closed`, `download`, `native`, and `validation` (also thrown
-by `run`).
+`streamActive`, `closed`, `download`, `native`, `undecodableDescription` (with the
+engine's JSON), and `validation` (also thrown by `run`).
 A failed engine call is `nativeFailure` with the operation, the native code, and
 any engine diagnostic.
 
@@ -256,7 +280,7 @@ mise run setup          # Install pinned tools
 mise run                # List available tasks
 mise run fmt            # Format Swift source
 mise run check          # Formatting, lint, and offline tests
-mise run test:native    # Both engines, embeddings, and Whistle speech
+mise run test:native    # Both engines, embeddings, speech, and vision
 mise run test:artifacts # Download every pinned engine wheel and weights archive
 mise run clean          # Remove package build artifacts
 swift build -c release
