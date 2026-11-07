@@ -3,8 +3,8 @@ import Foundation
 
 /// Downloads the same pinned engines and base weights as cactus-go.
 public enum Engine {
-    /// The Cactus engine version, which runs Needle 3 (the default generation) and
-    /// Whistle. Needle 2 keeps its own engine; see `version(for:)`.
+    /// The Cactus engine version, which runs Needle 3 (the default generation),
+    /// Whistle and Mirage. Needle 2 keeps its own engine; see `version(for:)`.
     public static let version = "4.0.0"
     static let maximumArtifactSize = 64 * 1024 * 1024
 
@@ -108,6 +108,30 @@ public enum Engine {
         try await EngineDownloads.shared.fetch(
             artifact: EngineRelease.speechWeights,
             directory: directory(release: .whistle, platform: platform, override: cacheDirectory),
+            session: session
+        )
+    }
+
+    /// Prepares the engine and vision weights for offline use, without fetching text or speech weights.
+    public static func fetchMirage(
+        platform: Platform = .current, cacheDirectory: URL? = nil, session: URLSession = .shared
+    ) async throws -> URL {
+        let library = try await fetchLibrary(
+            .mirage,
+            platform: platform,
+            cacheDirectory: cacheDirectory,
+            session: session
+        )
+        _ = try await fetchVisionWeights(platform: platform, cacheDirectory: cacheDirectory, session: session)
+        return library
+    }
+
+    static func fetchVisionWeights(
+        platform: Platform = .current, cacheDirectory: URL?, session: URLSession = .shared
+    ) async throws -> URL {
+        try await EngineDownloads.shared.fetch(
+            artifact: EngineRelease.visionWeights,
+            directory: directory(release: .mirage, platform: platform, override: cacheDirectory),
             session: session
         )
     }

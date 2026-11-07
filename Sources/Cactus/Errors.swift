@@ -18,10 +18,13 @@ public enum CactusError: Error, LocalizedError, Sendable {
     case native(String)
     /// A live transcription is open on the engine; other speech calls wait for its `stop`.
     case streamActive
-    /// The `Agent` or `Whistle` was closed.
+    /// The `Agent`, `Whistle` or `Mirage` was closed.
     case closed
     /// An engine or weights download could not be completed or verified.
     case download(String)
+    /// The engine's image description JSON does not fit `ImageDescription`.
+    /// `raw` carries the JSON, including the parts that did not decode.
+    case undecodableDescription(raw: Data, detail: String)
     /// The engine flagged negation or ungrounded fields. `run` throws this before
     /// executing any tool call of the flagged turn.
     case validation(Response)
@@ -37,6 +40,8 @@ public enum CactusError: Error, LocalizedError, Sendable {
             "cactus: a live transcription is in progress"
         case .closed:
             "cactus: closed"
+        case let .undecodableDescription(_, detail):
+            "cactus: decode description: \(detail)"
         case let .nativeFailure(operation, code, detail):
             "cactus: \(operation) failed with code \(code)" + (detail.isEmpty ? "" : ": \(detail)")
         case let .validation(response):

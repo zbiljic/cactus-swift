@@ -13,6 +13,7 @@ private extension Error {
         case .native: "native"
         case .streamActive: "streamActive"
         case .closed: "closed"
+        case .undecodableDescription: "undecodableDescription"
         case .download: "download"
         case .validation: "validation"
         case nil: nil
@@ -57,5 +58,14 @@ func typedErrorsAreMatchable() async throws {
     let needle2 = WhistleConfiguration(weightsPath: speech.path, libraryPath: "/test/libneedle.dylib")
     await #expect {
         try await Whistle(configuration: needle2, runtime: NativeRuntime(api: FakeNative().api))
+    } throws: { $0.localizedDescription == "cactus: unsupported native ABI: Cactus engine is required" }
+    // So does Mirage.
+    let vision = directory.appendingPathComponent("vision.cact")
+    try testWeights(vision: true).write(to: vision)
+    await #expect {
+        try await Mirage(
+            configuration: MirageConfiguration(weightsPath: vision.path, libraryPath: "/test/libneedle.dylib"),
+            runtime: NativeRuntime(api: FakeNative().api)
+        )
     } throws: { $0.localizedDescription == "cactus: unsupported native ABI: Cactus engine is required" }
 }

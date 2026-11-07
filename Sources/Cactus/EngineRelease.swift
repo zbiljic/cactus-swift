@@ -46,7 +46,7 @@ struct EngineRelease: Sendable {
         weights: nil
     )
 
-    /// The Cactus engine, which runs Needle 3 and Whistle.
+    /// The Cactus engine, which runs Needle 3, Whistle and Mirage.
     static let needle3 = Self(
         generation: 3,
         version: Engine.version,
@@ -89,6 +89,24 @@ struct EngineRelease: Sendable {
         libraryName: needle3.libraryName,
         libraries: needle3.libraries,
         weights: speechWeights
+    )
+
+    /// Vision weights run on the Cactus engine and share its cache directory.
+    static let visionWeights = EngineArtifact(
+        name: "mirage.cact",
+        repository: "Cactus-Compute/mirage",
+        revision: "76c1e9e53381aca8fc3843c636216c96ff220122",
+        path: "mirage.cact",
+        size: 21_611_043,
+        checksum: "4249a0f7515272ff76b9414bec17d7e7daf84b15b66c7fb4f17fce1e66f9f237"
+    )
+
+    static let mirage = Self(
+        generation: 3,
+        version: needle3.version,
+        libraryName: needle3.libraryName,
+        libraries: needle3.libraries,
+        weights: visionWeights
     )
 
     private static func needle2Wheel(_ tag: String, size: Int, checksum: String) -> EngineArtifact {

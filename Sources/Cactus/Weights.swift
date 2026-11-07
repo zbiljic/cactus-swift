@@ -43,7 +43,7 @@ enum Cact {
         static let raw: UInt8 = 4
     }
 
-    /// Tensors before the optional head manifest or the speech manifest:
+    /// Tensors before the optional head manifest, the speech manifest or the vision manifest:
     /// embedding, the per-layer blocks, mHC, permutations, the per-site engrams
     /// and final_norm. Per-layer and per-site tensors are counted separately
     /// from the fixed ones.
@@ -73,17 +73,25 @@ enum Cact {
         static let version: Float = 1
         static let sampleRateIndex = 9
     }
+
+    /// The vision manifest holds 36 Float32 values: a magic number and the
+    /// vision geometry. It has no layout version field.
+    enum VisionManifest {
+        static let length = 36
+        static let magic: Float = 4721
+    }
 }
 
 /// Reads only recognized v3 kind/head metadata; the native loader validates model tensors.
 struct WeightMetadata {
-    enum Kind { case text, speech }
+    enum Kind { case text, speech, vision }
 
     private let data: Data
     private let directory: Int
     private let count: Int
     /// Index of the tensor record after final_norm: the head manifest of a text
-    /// archive or the audio manifest of a speech archive.
+    /// archive, the audio manifest of a speech archive or the vision manifest of
+    /// a Mirage archive.
     private let manifest: Int
     private let width: Int
     private let layers: Int
@@ -117,14 +125,19 @@ struct WeightMetadata {
         if headCodes != nil {
             return .text
         }
+        let value = { Float(bitPattern: data.integer(tensor.offset + $0 * 4, UInt32.self)) }
         // Recognize the published version-1 audio manifest only; extend this
         // classifier when upstream publishes another speech archive layout.
         if tensor.matches(Cact.DType.fp32, [Cact.AudioManifest.length]), manifest + 1 < count {
-            let value = { Float(bitPattern: data.integer(tensor.offset + $0 * 4, UInt32.self)) }
             let geometry = (value(0), value(1), value(Cact.AudioManifest.sampleRateIndex))
             if geometry == (Cact.AudioManifest.magic, Cact.AudioManifest.version, Float(Whistle.sampleRate)) {
                 return .speech
             }
+        }
+        // Likewise, recognize only the published 36-value vision manifest.
+        let visionManifest = tensor.matches(Cact.DType.fp32, [Cact.VisionManifest.length]) && manifest + 1 < count
+        if visionManifest, value(0) == Cact.VisionManifest.magic {
+            return .vision
         }
         return nil
     }

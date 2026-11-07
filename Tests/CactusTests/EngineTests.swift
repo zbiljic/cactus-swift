@@ -174,7 +174,9 @@ func downloadsAndVerifiesBaseWeightsAndIsolatesGenerationCaches() async throws {
     #expect(try EngineRelease(3).libraryName == "libcactus.dylib")
     #expect(try Engine.version(for: 0) == "4.0.0")
     #expect(try Engine.version(for: 2) == "2.0.4")
-    for weights in try [EngineRelease(3).weights, EngineRelease.speechWeights].map({ try #require($0) }) {
+    for release in [EngineRelease.needle3, .whistle, .mirage] {
+        let weights = try #require(release.weights)
+        #expect(try release.library(platform: .current).url == EngineRelease(3).library(platform: .current).url)
         #expect(weights.revision.count == 40 && weights.checksum.count == 64)
         #expect((1 ... Engine.maximumArtifactSize).contains(weights.size))
         #expect(weights
@@ -182,8 +184,6 @@ func downloadsAndVerifiesBaseWeightsAndIsolatesGenerationCaches() async throws {
     }
     #expect(try EngineRelease(3).weights?.repository == "Cactus-Compute/needle3")
     #expect(try EngineRelease(2).weights == nil)
-    #expect(try EngineRelease.whistle.library(platform: .current).url == EngineRelease(3).library(platform: .current)
-        .url)
     for generation in [-1, 1, 4] {
         #expect(throws: CactusError.self) { try Engine.cached(generation: generation) }
         await #expect(throws: CactusError.self) { try await Engine.fetch(generation: generation) }
@@ -215,7 +215,34 @@ func whistleFetchUsesVerifiedCacheWithoutTextWeights() async throws {
     #expect(EngineRelease.whistle.weights?.name == "whistle.cact")
 }
 
-/// Downloads every pinned macOS engine wheel and both weights archives from Hugging Face.
+@Test
+func mirageFetchUsesVerifiedCacheWithoutOtherWeights() async throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let library = try EngineRelease(3).library(platform: .current)
+    for artifact in [library, EngineRelease.visionWeights] {
+        let target = directory.appendingPathComponent(artifact.name)
+        let data = artifact.name == "mirage.cact" ? testWeights(vision: true) : Data("library".utf8)
+        try data.write(to: target)
+        try "\(artifact.checksum)\n\(Engine.digest(data))\n".write(
+            to: target.appendingPathExtension("sha256"), atomically: true, encoding: .utf8
+        )
+    }
+    let configuration = URLSessionConfiguration.ephemeral
+    configuration.protocolClasses = [StubProtocol.self]
+    let session = URLSession(configuration: configuration)
+    defer { session.invalidateAndCancel() }
+    #expect(try await Engine.fetchMirage(cacheDirectory: directory, session: session)
+        == directory.appendingPathComponent(library.name))
+    for other in ["needle3.cact", "whistle.cact"] {
+        #expect(!FileManager.default.fileExists(atPath: directory.appendingPathComponent(other).path))
+    }
+    #expect(EngineRelease.visionWeights.url.contains("/Cactus-Compute/mirage/resolve/"))
+    #expect(EngineRelease.mirage.weights?.name == "mirage.cact")
+}
+
+/// Downloads every pinned macOS engine wheel and every weights archive from Hugging Face.
 /// It loads the engines from a temporary cache and keeps them mapped, so run it in a
 /// separate `swift test` invocation from NativeIntegrationTests, as the mise tasks do.
 @Suite(.enabled(if: ProcessInfo.processInfo.environment["CACTUS_ARTIFACT_TEST"] == "1"))
@@ -250,6 +277,7 @@ struct PinnedArtifactTests {
         for (artifact, path) in try await [
             (#require(EngineRelease.needle3.weights), Engine.fetchWeights(of: .needle3, cacheDirectory: weights)),
             (EngineRelease.speechWeights, Engine.fetchSpeechWeights(cacheDirectory: weights)),
+            (EngineRelease.visionWeights, Engine.fetchVisionWeights(cacheDirectory: weights)),
         ] {
             let path = try #require(path)
             let size = try path.resourceValues(forKeys: [.fileSizeKey]).fileSize

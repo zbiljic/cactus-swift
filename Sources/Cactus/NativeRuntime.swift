@@ -26,6 +26,12 @@ struct NativeAPI: Sendable {
     typealias Embed = @convention(c) (
         UnsafePointer<CChar>?, UnsafePointer<Float>?, Int32, UnsafeMutablePointer<Float>?, Int32
     ) -> Int32
+    /// Returns a token count, not the byte length of the NUL-terminated output.
+    typealias Describe = @convention(c) (
+        UnsafePointer<UInt8>?, Int32, Int32, UnsafePointer<CChar>?, UnsafePointer<CChar>?, UnsafePointer<CChar>?,
+        UnsafeMutablePointer<CChar>?, Int32
+    ) -> Int32
+    typealias Models = @convention(c) () -> Int32
 
     let initialize: @Sendable (UnsafePointer<CChar>, UnsafePointer<CChar>, UnsafePointer<CChar>?) -> Int32
     let complete: @Sendable (String, Int32, UnsafeMutableBufferPointer<CChar>) -> Int32
@@ -39,11 +45,10 @@ struct NativeAPI: Sendable {
     /// The Needle 2 engine's needle_* ABI: it embeds its model and completes with four arguments.
     static let needle2Symbols = ["init", "complete", "reset", "load"]
 
-    /// The cactus_* ABI that the Cactus engine exports in full. cactus_describe is
-    /// bound only when vision support needs it.
+    /// The cactus_* ABI that the Cactus engine exports in full.
     static let cactusSymbols = [
         "load", "models", "last_error", "init", "complete", "set_audio", "reset",
-        "embed", "transcribe", "stream_transcribe_process", "stream_transcribe_stop",
+        "embed", "transcribe", "stream_transcribe_process", "stream_transcribe_stop", "describe",
     ]
 
     static func open(_ path: String, generation: Int) throws -> Self {
@@ -60,8 +65,8 @@ struct NativeAPI: Sendable {
     }
 
     /// Binds the ABI of a generation: needle_* for the Needle 2 engine and cactus_*
-    /// for the Cactus engine that runs Needle 3 and Whistle. A library missing any
-    /// function of that ABI is rejected.
+    /// for the Cactus engine that runs Needle 3, Whistle and Mirage. A library
+    /// missing any function of that ABI is rejected.
     static func bind(generation: Int, resolve: @escaping (String) -> UnsafeMutableRawPointer?) throws -> Self {
         let needle2 = generation == 2
         let function = needle2
@@ -135,56 +140,6 @@ struct NativeAPI: Sendable {
     }
 }
 
-/// The Cactus engine functions beyond the text ABI it shares with Needle 2:
-/// embeddings, speech and live transcription.
-struct CactusFunctions: Sendable {
-    typealias StreamProcessCall = @Sendable (
-        UnsafeBufferPointer<Float>,
-        AudioOptions,
-        UnsafeMutableBufferPointer<CChar>
-    ) -> Int32
-
-    var embed: @Sendable (String, UnsafeMutableBufferPointer<Float>) -> Int32
-    var transcribe: @Sendable (UnsafeBufferPointer<Float>, AudioOptions, UnsafeMutableBufferPointer<CChar>) -> Int32
-    var setAudio: @Sendable (AudioOptions) -> Void
-    var completeAudio: @Sendable (UnsafeBufferPointer<Float>, Int32, UnsafeMutableBufferPointer<CChar>) -> Int32
-    var streamProcess: StreamProcessCall
-    var streamStop: @Sendable (UnsafeMutableBufferPointer<CChar>) -> Int32
-}
-
-extension CactusFunctions {
-    init(_ function: NativeAPI.Symbols) throws {
-        let embed = try function("embed", as: NativeAPI.Embed.self)
-        let complete = try function("complete", as: NativeAPI.CompleteWithAudio.self)
-        let transcribe = try function("transcribe", as: NativeAPI.Transcribe.self)
-        let setAudio = try function("set_audio", as: NativeAPI.SetAudio.self)
-        let streamProcess = try function("stream_transcribe_process", as: NativeAPI.StreamProcess.self)
-        let streamStop = try function("stream_transcribe_stop", as: NativeAPI.StreamStop.self)
-        self.init(
-            embed: { text, output in
-                text.withCString { embed($0, nil, 0, output.baseAddress, Int32(output.count)) }
-            },
-            transcribe: { pcm, options, output in
-                options.withCStringOptions {
-                    transcribe(pcm.baseAddress, Int32(pcm.count), $0, $1, $2, output.baseAddress, Int32(output.count))
-                }
-            },
-            setAudio: { options in options.withCStringOptions { setAudio($0, $1, $2) } },
-            completeAudio: { pcm, tokens, output in
-                complete(nil, pcm.baseAddress, Int32(pcm.count), tokens, output.baseAddress, Int32(output.count))
-            },
-            streamProcess: { pcm, options, output in
-                options.withCStringOptions { language, keywords, _ in
-                    streamProcess(
-                        pcm.baseAddress, Int32(pcm.count), language, keywords, output.baseAddress, Int32(output.count)
-                    )
-                }
-            },
-            streamStop: { output in streamStop(output.baseAddress, Int32(output.count)) }
-        )
-    }
-}
-
 /// One actor per generation serializes its global C engine; independent
 /// same-generation engines need separate processes.
 actor NativeRuntime {
@@ -198,7 +153,7 @@ actor NativeRuntime {
         generation == 2 ? needle2 : needle3
     }
 
-    private var api: NativeAPI?
+    private(set) var api: NativeAPI?
     private var libraryPath: String?
     private var activeID: UUID?
     private var activeWeights: String?
@@ -206,6 +161,7 @@ actor NativeRuntime {
     private var calibratedWeights = false
     private var speechWeights: String?
     private var speechBlob: NSData?
+    private(set) var visionWeights: String?
     private var initializationStorage: [NSData] = []
     private var closedSessions: Set<UUID> = []
     /// The open live transcription, which the engine holds one of.
@@ -330,6 +286,50 @@ actor NativeRuntime {
             speechWeights = session.weightsPath
         }
         return (api, cactus)
+    }
+
+    func initializeVision(_ session: VisionSession, library: URL) throws {
+        try ensureLibrary(library, generation: 3)
+        try bindVision(session)
+    }
+
+    /// Releases a vision session; later calls throw `CactusError.closed`. Loaded
+    /// vision weights stay in the engine.
+    func closeVision(_ session: VisionSession) {
+        closedSessions.insert(session.id)
+    }
+
+    /// Loads the session's vision weights unless they are the loaded vision model.
+    /// Text and speech models, the conversation and an open stream are kept.
+    @discardableResult
+    private func bindVision(_ session: VisionSession) throws -> (NativeAPI, CactusFunctions) {
+        guard let api else { throw CactusError.native("engine is not loaded") }
+        guard let cactus = api.cactus else { throw Self.cactusRequired }
+        guard !closedSessions.contains(session.id) else { throw CactusError.closed }
+        if visionWeights != session.weightsPath {
+            let data = try session.archive()
+            visionWeights = nil
+            // The engine copies the archive, so the data is not retained.
+            let code = data.withUnsafeBytes { bytes in
+                bytes.baseAddress.map { api.load($0, UInt64(bytes.count)) } ?? -1
+            }
+            guard code >= 0 else { throw api.failure("load vision weights", code: code) }
+            guard cactus.models() & CactusFunctions.visionModel != 0 else {
+                throw CactusError.native("engine did not load the vision model")
+            }
+            visionWeights = session.weightsPath
+        }
+        return (api, cactus)
+    }
+
+    func describe(_ session: VisionSession, image: RGBImage, request: VisionRequest) throws -> Data {
+        try Task.checkCancellation()
+        let (api, cactus) = try bindVision(session)
+        let describe = cactus.describe
+        var buffer = [CChar](repeating: 0, count: session.bufferSize)
+        let code = buffer.withUnsafeMutableBufferPointer { describe(image, request, $0) }
+        try Task.checkCancellation()
+        return try api.output("describe", code: code, buffer: buffer)
     }
 
     func transcribe(_ session: SpeechSession, pcm: [Float], options: AudioOptions) throws -> Transcript {

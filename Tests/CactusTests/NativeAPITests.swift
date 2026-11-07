@@ -14,7 +14,9 @@ extension CactusFunctions {
         setAudio: { _ in },
         completeAudio: { _, _, _ in -1 },
         streamProcess: { _, _, _ in -1 },
-        streamStop: { _ in -1 }
+        streamStop: { _ in -1 },
+        describe: { _, _, _ in -1 },
+        models: { 0 }
     )
 }
 
@@ -77,7 +79,11 @@ func nativeSymbols(generation: Int) -> [String: UnsafeMutableRawPointer] {
         "cactus_init": address(initialize), "cactus_reset": address(reset), "cactus_load": address(load),
         "cactus_complete": address(cactus), "cactus_embed": address(embed), "cactus_last_error": address(lastError),
     ]
-    for name in ["cactus_models", "cactus_transcribe", "cactus_set_audio"] {
+    let models: NativeAPI.Models = { 7 }
+    let describe: NativeAPI.Describe = { _, _, _, _, _, _, _, _ in -1 }
+    symbols["cactus_models"] = address(models)
+    symbols["cactus_describe"] = address(describe)
+    for name in ["cactus_transcribe", "cactus_set_audio"] {
         symbols[name] = address(reset) // Required, but not called here.
     }
     symbols.merge(streamSymbols()) { _, new in new }
@@ -99,6 +105,7 @@ func nativeCompletionABI(generation: Int) throws {
         var vector = [Float](repeating: 0, count: 2)
         #expect(vector.withUnsafeMutableBufferPointer { embed("hello", $0) } == 2)
         #expect(vector == [0.25, -0.75])
+        #expect(api.cactus?.models() == 7)
     } else {
         #expect(api.lastError == nil && api.cactus == nil)
         // A pre-4.0 Needle 3 library shares the four names with a six-argument completion.

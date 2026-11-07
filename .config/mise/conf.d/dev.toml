@@ -25,7 +25,7 @@ description = "Run offline tests"
 run = "swift test"
 
 [tasks."test:native"]
-description = "Test both pinned engines, text embeddings and Whistle speech"
+description = "Test both pinned engines, text embeddings, Whistle speech and Mirage vision"
 env.CACTUS_NATIVE_TEST = "1"
 run = "swift test --filter NativeIntegrationTests"
 

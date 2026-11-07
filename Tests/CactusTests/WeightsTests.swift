@@ -2,13 +2,15 @@
 import Foundation
 import Testing
 
-// swiftlint:disable:next cyclomatic_complexity
-func testWeights(heads: [UInt16] = [], quantized: Bool = true, speech: Bool = false) -> Data {
+// swiftlint:disable:next cyclomatic_complexity function_body_length
+func testWeights(heads: [UInt16] = [], quantized: Bool = true, speech: Bool = false, vision: Bool = false) -> Data {
     // Metadata fixtures only; placeholder model tensors are never sent to a real engine.
     var tensors: [(UInt8, [Int])] = Array(repeating: (1, [1]), count: 66)
     tensors.append((1, [4]))
     if speech {
         tensors.append((2, [13]))
+    } else if vision {
+        tensors.append((2, [36])) // The image encoder follows in a published archive.
     } else if !heads.isEmpty {
         tensors.append((1, [heads.count]))
     }
@@ -61,12 +63,17 @@ func testWeights(heads: [UInt16] = [], quantized: Bool = true, speech: Bool = fa
                     data.put(value.bitPattern, at: offset + index * 4)
                 }
             }
+            if vision {
+                for (index, value): (Int, Float) in [4721, 8192, 512, 5, 32, 64, 128, 256, 512].enumerated() {
+                    data.put(value.bitPattern, at: offset + index * 4)
+                }
+            }
         }
     }
     return data
 }
 
-private extension Data {
+extension Data {
     mutating func put(_ value: some FixedWidthInteger, at offset: Int) {
         var value = value.littleEndian
         Swift.withUnsafeBytes(of: &value) { replaceSubrange(offset ..< offset + $0.count, with: $0) }
