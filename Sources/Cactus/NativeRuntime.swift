@@ -160,7 +160,6 @@ actor NativeRuntime {
     private var weightsBlob: NSData?
     private var calibratedWeights = false
     private var speechWeights: String?
-    private var speechBlob: NSData?
     private(set) var visionWeights: String?
     private var initializationStorage: [NSData] = []
     private var closedSessions: Set<UUID> = []
@@ -276,13 +275,14 @@ actor NativeRuntime {
             guard WeightMetadata(data)?.kind == .speech else {
                 throw CactusError.invalidInput("weights are not a recognized speech model")
             }
-            let blob = NSData(data: data)
-            let code = api.load(blob.bytes, UInt64(blob.length))
+            // The engine copies the archive, so the data is not retained.
+            let code = data.withUnsafeBytes { bytes in
+                bytes.baseAddress.map { api.load($0, UInt64(bytes.count)) } ?? -1
+            }
             guard code >= 0 else {
                 speechWeights = nil
                 throw api.failure("load speech weights", code: code)
             }
-            speechBlob = blob
             speechWeights = session.weightsPath
         }
         return (api, cactus)
