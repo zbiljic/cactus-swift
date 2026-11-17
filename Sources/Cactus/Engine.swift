@@ -1,7 +1,7 @@
 import CryptoKit
 import Foundation
 
-/// Downloads the same pinned engines and base weights as cactus-go.
+/// Downloads and caches the checksum-pinned engines and base weights.
 public enum Engine {
     /// The Cactus engine version, which runs Needle 3 (the default generation),
     /// Whistle and Mirage. Needle 2 keeps its own engine; see `version(for:)`.
