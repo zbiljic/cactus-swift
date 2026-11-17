@@ -180,7 +180,7 @@ public enum Engine {
     }
 
     private static var cacheRoot: URL {
-        FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".cache/cactus-swift", isDirectory: true)
+        FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".cache/cactus", isDirectory: true)
     }
 
     private static func customDirectory(_ override: URL) throws -> URL {

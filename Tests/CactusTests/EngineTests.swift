@@ -200,7 +200,7 @@ func defaultWeightsCacheIsSharedAcrossEngineVersions() throws {
         EngineRelease.visionWeights,
     ] {
         #expect(try Engine.weightsDirectory(weights, override: nil).path
-            .hasSuffix("/.cache/cactus-swift/models/\(weights.checksum.prefix(16))"))
+            .hasSuffix("/.cache/cactus/models/\(weights.checksum.prefix(16))"))
         #expect(try Engine.weightsDirectory(weights, override: directory) == directory.standardizedFileURL)
     }
     #expect(throws: CactusError.self) {
