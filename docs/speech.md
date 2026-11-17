@@ -23,9 +23,10 @@ Supply mono `[Float]` PCM at 16000 Hz, with finite samples in `[-1, 1]`, of any
 length: up to 30 seconds runs as one pass, and longer audio runs as consecutive
 30 second windows with word times counted from the start of the clip. The output
 buffer grows for long clips. Empty clips and silence return empty text and
-language. `language`
-is empty for detection, or `en`, `de`, `fr`, `es`, `it`, `nl`, or `pl`. Transcripts
-include `ttftMS`, `decodeTPS`, and optional words with start/end times in seconds
+language. `language` is empty for detection, or one of `languages`, which the
+Whistle reads from the language tokens of its weights: `en`, `de`, `fr`, `es`,
+`it`, `nl` and `pl` for the published model, or the languages of a fine-tuned
+model. Transcripts include `ttftMS`, `decodeTPS`, and optional words with start/end times in seconds
 and probabilities. File decoding, microphone capture, and resampling belong to
 the caller.
 

@@ -1,7 +1,8 @@
 import Foundation
 
 public struct AudioOptions: Sendable, Equatable {
-    /// Empty detects the language; otherwise en, de, fr, es, it, nl or pl.
+    /// Empty detects the language; otherwise one of `Whistle.languages`: en, de,
+    /// fr, es, it, nl or pl for the published model.
     public var language: String
     public var keywords: [String]
     public var wordTimestamps: Bool
@@ -12,15 +13,22 @@ public struct AudioOptions: Sendable, Equatable {
         self.wordTimestamps = wordTimestamps
     }
 
-    func validate(_ pcm: [Float]) throws {
+    static func validate(_ pcm: [Float]) throws {
         guard pcm.count <= Int(Int32.max) else {
             throw CactusError.invalidInput("audio has \(pcm.count) samples; want at most \(Int32.max)")
         }
         guard pcm.allSatisfy({ $0.isFinite && (-1 ... 1).contains($0) }) else {
             throw CactusError.invalidInput("PCM samples must be finite values in [-1, 1]")
         }
-        guard ["", "en", "de", "fr", "es", "it", "nl", "pl"].contains(language) else {
-            throw CactusError.invalidInput("unsupported speech language \(language)")
+    }
+
+    func validate(_ pcm: [Float], languages: [String]) throws {
+        try Self.validate(pcm)
+        try validateCString(language, name: "speech language")
+        guard language.isEmpty || languages.contains(language) else {
+            throw CactusError.invalidInput(
+                "unsupported speech language \(language); want one of \(languages.joined(separator: ", "))"
+            )
         }
         try validateCString(keywords.joined(separator: "\n"), name: "speech keywords")
     }
@@ -88,6 +96,9 @@ public final class Whistle: Sendable {
 
     let session: SpeechSession
     let runtime: NativeRuntime
+    /// The language codes the speech weights accept for `AudioOptions.language`,
+    /// read from their tokenizer.
+    public let languages: [String]
 
     public convenience init(configuration: WhistleConfiguration = WhistleConfiguration()) async throws {
         try await self.init(configuration: configuration, runtime: nil)
@@ -107,6 +118,8 @@ public final class Whistle: Sendable {
         } else {
             try await Engine.fetchSpeechWeights(cacheDirectory: configuration.cacheDirectory)
         }
+        // Loading the weights reports an unreadable archive.
+        languages = SpeechLanguages.read(path: weights.path) ?? SpeechLanguages.published
         session = SpeechSession(weightsPath: weights.path, bufferSize: configuration.bufferSize)
         self.runtime = runtime ?? NativeRuntime.shared(for: 3)
         try await self.runtime.initializeSpeech(session, library: library)
@@ -117,7 +130,7 @@ public final class Whistle: Sendable {
     /// start of the clip. Empty clips and silence produce empty text.
     public func transcribe(_ pcm: [Float], options: AudioOptions = AudioOptions()) async throws -> Transcript {
         try Task.checkCancellation()
-        try options.validate(pcm)
+        try options.validate(pcm, languages: languages)
         return try await runtime.transcribe(session, pcm: pcm, options: options)
     }
 
@@ -128,7 +141,7 @@ public final class Whistle: Sendable {
     public func embed(_ pcm: [Float]) async throws -> [Float] {
         try Task.checkCancellation()
         guard !pcm.isEmpty else { throw CactusError.invalidInput("audio embedding requires samples") }
-        try AudioOptions().validate(pcm)
+        try AudioOptions.validate(pcm)
         return try await runtime.embed(session, pcm: pcm)
     }
 
@@ -144,7 +157,7 @@ public final class Whistle: Sendable {
             throw CactusError.invalidInput("audio completion requires a Needle 3 agent sharing the speech engine")
         }
         let tokens = try Agent.tokens(maxNewTokens)
-        try options.validate(pcm)
+        try options.validate(pcm, languages: languages)
         return try await runtime.completeSpeech(
             session,
             text: agent.session,
@@ -158,7 +171,7 @@ public final class Whistle: Sendable {
     /// `wordTimestamps` is ignored because every step carries word times. Nothing
     /// reaches the engine until the first `process`.
     public func stream(options: AudioOptions = AudioOptions()) throws -> TranscriptionStream {
-        try options.validate([])
+        try options.validate([], languages: languages)
         return TranscriptionStream(session: StreamSession(speech: session, options: options), runtime: runtime)
     }
 

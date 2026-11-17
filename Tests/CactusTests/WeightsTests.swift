@@ -155,3 +155,65 @@ func confidenceUsesLoadedBytesAndRejectsWrongKind(calibrated: Bool) async throws
     }
     #expect(fake.snapshot.loads == 3)
 }
+
+func testTokenizer(_ pieces: [String]) -> Data {
+    var data = Data(count: SpeechLanguages.tokenizerHeaderSize)
+    data.put(UInt32(pieces.count), at: 0)
+    for piece in pieces {
+        var entry = Data(count: SpeechLanguages.pieceHeaderSize)
+        entry.put(UInt16(piece.utf8.count), at: 5)
+        data += entry + Data(piece.utf8)
+    }
+    return data
+}
+
+/// Stores a tokenizer as the raw tensor after the audio manifest.
+func testSpeechWeights(tokenizer pieces: [String]) -> Data {
+    var data = testWeights(speech: true)
+    let tokenizer = testTokenizer(pieces)
+    let record = 308 + 68 * 44
+    data.put(UInt64(data.count), at: record + 20)
+    data.put(UInt64(tokenizer.count), at: record + 28)
+    return data + tokenizer
+}
+
+private func speechLanguages(_ data: Data) -> [String]? {
+    SpeechLanguages.read(size: data.count) { offset, count in
+        offset + count <= data.count ? data.subdata(in: offset ..< offset + count) : nil
+    }
+}
+
+@Test
+func speechLanguagesReadTheTrailingTokenizerCodes() throws {
+    for (pieces, want): ([String], [String]?) in [
+        (["<|im_start|>", "<|im_end|>", "a", "b", "<|en|>", "<|de|>"], ["en", "de"]),
+        (["<|pt|>", "word", "<|en|>"], ["en"]), // Other pieces reset the run.
+        (["<|en|>", "word"], nil),
+        (["<|en|>", "<||>"], nil),
+        (["<|en|>", "<|>"], nil),
+        ([], nil),
+        (["x", "<|pt-BR|>", "<|en|>"], ["pt-BR", "en"]),
+        (["<|en\0x|>"], nil), // The engine would read a truncated code.
+        (["<|\u{301}en|>"], ["\u{301}en"]), // Codes are matched on bytes, not characters.
+    ] {
+        let data = testSpeechWeights(tokenizer: pieces)
+        #expect(WeightMetadata(data)?.kind == .speech)
+        #expect(speechLanguages(data) == want, "\(pieces)")
+    }
+    let data = testSpeechWeights(tokenizer: ["<|en|>"])
+    for size in 0 ..< data.count {
+        #expect(speechLanguages(data.prefix(size)) == nil, "\(size) bytes")
+    }
+    var tokenizer = testTokenizer(["<|en|>"])
+    tokenizer.put(UInt32.max, at: 0)
+    #expect(SpeechLanguages.languages(tokenizer: tokenizer) == nil)
+    var invalid = testTokenizer(["<|en|>"])
+    invalid[SpeechLanguages.tokenizerHeaderSize + SpeechLanguages.pieceHeaderSize + 2] = 0xFF
+    #expect(SpeechLanguages.languages(tokenizer: invalid) == nil)
+    #expect(speechLanguages(testWeights(speech: true)) == nil)
+    let path = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).cact")
+    try data.write(to: path)
+    defer { try? FileManager.default.removeItem(at: path) }
+    #expect(SpeechLanguages.read(path: path.path) == ["en"])
+    #expect(SpeechLanguages.read(path: path.path + ".missing") == nil)
+}

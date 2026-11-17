@@ -176,7 +176,9 @@ func speechInputValidationPrecedesNativeCalls() async throws {
     ] {
         await #expect(throws: CactusError.self) { try await speech.transcribe(pcm) }
     }
-    for options in [AudioOptions(language: "xx"), AudioOptions(keywords: ["bad\0value"])] {
+    for options in [
+        AudioOptions(language: "xx"), AudioOptions(language: "en\0x"), AudioOptions(keywords: ["bad\0value"]),
+    ] {
         await #expect(throws: CactusError.self) { try await speech.transcribe([], options: options) }
     }
     for size in [0, 1, Int(Int32.max) + 1] {
@@ -195,7 +197,7 @@ func speechInputValidationPrecedesNativeCalls() async throws {
     }
     await #expect(throws: CancellationError.self) { try await cancelled.value }
     #expect(probe.callCount == 0)
-    try AudioOptions().validate([-1, 0, 1])
+    try AudioOptions.validate([-1, 0, 1])
 }
 
 @Test(arguments: ["error", "malformed", "cancel"])
@@ -305,6 +307,32 @@ func speechCABIArguments() throws {
 }
 
 @Test
+func whistleLanguagesComeFromTheWeights() async throws {
+    let directory = try speechDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let probe = SpeechProbe()
+    let runtime = NativeRuntime(api: probe.api)
+    var config = WhistleConfiguration(
+        weightsPath: directory.appendingPathComponent("speech.cact").path, libraryPath: "/test/libneedle.dylib"
+    )
+    // The fixture's tokenizer lists no languages, so the published ones apply.
+    let published = try await Whistle(configuration: config, runtime: runtime)
+    #expect(published.languages == SpeechLanguages.published)
+    let custom = directory.appendingPathComponent("custom.cact")
+    try testSpeechWeights(tokenizer: ["a", "<|pt|>", "<|en|>"]).write(to: custom)
+    config.weightsPath = custom.path
+    let speech = try await Whistle(configuration: config, runtime: runtime)
+    #expect(speech.languages == ["pt", "en"])
+    _ = try await speech.transcribe([], options: AudioOptions(language: "pt"))
+    _ = try speech.stream(options: AudioOptions(language: "pt"))
+    await #expect { try await speech.transcribe([], options: AudioOptions(language: "de")) } throws: { error in
+        error.localizedDescription.contains("unsupported speech language de; want one of pt, en")
+    }
+    #expect(throws: CactusError.self) { try speech.stream(options: AudioOptions(language: "de")) }
+    _ = try await published.transcribe([], options: AudioOptions(language: "de"))
+}
+
+@Test
 func speechEmbedValidatesAndReportsEngineErrors() async throws {
     let directory = try speechDirectory()
     defer { try? FileManager.default.removeItem(at: directory) }
@@ -365,8 +393,10 @@ func speechEmbedValidatesAndReportsEngineErrors() async throws {
 
 extension NativeIntegrationTests {
     @Test
-    func nativeWhistleEmbed() async throws {
+    func nativeWhistleEmbedAndLanguages() async throws {
         let speech = try await Whistle()
+        #expect(speech.languages == SpeechLanguages.published)
+        #expect(SpeechLanguages.read(path: speech.session.weightsPath) == SpeechLanguages.published)
         // 512-float encoder rows, about one per 80 ms; a partial frame counts
         // once it holds a full 10 ms hop.
         let rows = [1: 1, 1280: 1, 1439: 1, 1440: 2, Whistle.sampleRate: 13, 30 * Whistle.sampleRate: 375]

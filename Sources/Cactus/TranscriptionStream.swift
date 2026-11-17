@@ -65,7 +65,8 @@ public actor TranscriptionStream {
     public func process(_ pcm: [Float]) async throws -> StreamTranscript {
         try Task.checkCancellation()
         guard !stopped else { throw Self.stoppedError }
-        try session.options.validate(pcm)
+        // The language and keywords were checked when the stream was created.
+        try AudioOptions.validate(pcm)
         do {
             return try await runtime.streamProcess(session, pcm: pcm)
         } catch let failure as StreamFailure {

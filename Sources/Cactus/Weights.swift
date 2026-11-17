@@ -255,6 +255,93 @@ struct WeightMetadata {
     }
 }
 
+/// Reads the language codes of a speech archive the way upstream does: the
+/// trailing run of `<|code|>` pieces in the vocabulary of the first raw tensor.
+enum SpeechLanguages {
+    /// The languages of the published Whistle model, used when an archive's tokenizer lists none.
+    static let published = ["en", "de", "fr", "es", "it", "nl", "pl"]
+
+    /// A speech tokenizer is a 24-byte header whose first UInt32 is the piece
+    /// count, then per piece five bytes of score and flags, a UInt16 length and
+    /// the UTF-8 text.
+    static let tokenizerHeaderSize = 24
+    static let pieceHeaderSize = 7
+    static let maxTokenizerSize = 64 << 20
+
+    /// Reads only the header, the tensor directory and the tokenizer of the file.
+    /// Returns nil for an archive that cannot be read or lacks that layout.
+    static func read(path: String) -> [String]? {
+        guard let file = FileHandle(forReadingAtPath: path) else { return nil }
+        defer { try? file.close() }
+        guard let size = try? file.seekToEnd(), let size = Int(exactly: size) else { return nil }
+        return read(size: size) { offset, count in
+            guard
+                (try? file.seek(toOffset: UInt64(offset))) != nil,
+                let data = try? file.read(upToCount: count) ?? Data(), data.count == count else { return nil }
+            return data
+        }
+    }
+
+    /// Reads from an archive of `size` bytes through `bytes(offset, count)`.
+    static func read(size: Int, bytes: (Int, Int) -> Data?) -> [String]? {
+        guard
+            size >= Cact.headerSize, let header = bytes(0, Cact.headerSize),
+            header.integer(0, UInt32.self) == Cact.needle3Tag else { return nil }
+        let field = { Int(header.integer($0 * 4, UInt32.self)) }
+        let directory = Cact.headerSize + field(Cact.Field.codebookSize) * 4
+        let count = field(Cact.Field.tensorCount)
+        guard
+            directory <= size, count <= (size - directory) / Cact.recordSize,
+            let records = bytes(directory, count * Cact.recordSize) else { return nil }
+        let end = directory + count * Cact.recordSize
+        for record in stride(from: 0, to: records.count, by: Cact.recordSize) {
+            guard
+                records[record + Cact.Record.dtype] == Cact.DType.raw,
+                records[record + Cact.Record.rank] == 0 else { continue }
+            guard
+                let offset = Int(exactly: records.integer(record + Cact.Record.offset, UInt64.self)),
+                let length = Int(exactly: records.integer(record + Cact.Record.size, UInt64.self)),
+                offset >= end, offset <= size, length <= size - offset, length <= maxTokenizerSize,
+                let tokenizer = bytes(offset, length) else { return nil }
+            return languages(tokenizer: tokenizer)
+        }
+        return nil
+    }
+
+    static func languages(tokenizer data: Data) -> [String]? {
+        guard data.count >= tokenizerHeaderSize else { return nil }
+        let pieces = Int(data.integer(0, UInt32.self))
+        guard pieces <= (data.count - tokenizerHeaderSize) / pieceHeaderSize else { return nil }
+        var languages: [String] = []
+        var at = tokenizerHeaderSize
+        for _ in 0 ..< pieces {
+            guard data.count - at >= pieceHeaderSize else { return nil }
+            let length = Int(data.integer(at + 5, UInt16.self))
+            at += pieceHeaderSize
+            guard data.count - at >= length else { return nil }
+            let piece = data[at ..< at + length]
+            at += length
+            if let code = code(piece) {
+                languages.append(code)
+            } else {
+                languages.removeAll()
+            }
+        }
+        return languages.isEmpty ? nil : languages
+    }
+
+    /// The code of a `<|code|>` piece, matched on bytes as upstream does. A
+    /// code must be valid UTF-8 without NUL, so it passes to the engine intact.
+    private static func code(_ piece: Data) -> String? {
+        let (open, close) = (Data("<|".utf8), Data("|>".utf8))
+        guard piece.count > open.count + close.count, piece.starts(with: open), piece.suffix(2).elementsEqual(close)
+        else { return nil }
+        let code = piece.dropFirst(open.count).dropLast(close.count)
+        guard !code.contains(0) else { return nil }
+        return String(bytes: code, encoding: .utf8)
+    }
+}
+
 private extension Data {
     /// Callers have checked the containing header, tensor record or payload bounds.
     func integer<T: FixedWidthInteger>(_ offset: Int, _: T.Type) -> T {
