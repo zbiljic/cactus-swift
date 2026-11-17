@@ -121,6 +121,17 @@ public final class Whistle: Sendable {
         return try await runtime.transcribe(session, pcm: pcm, options: options)
     }
 
+    /// Returns the speech encoder output for up to 30 seconds of PCM as flattened
+    /// rows, about one per 80 ms of audio; the published model's rows are 512
+    /// floats wide. Longer clips fail with the engine's limit, so split them first.
+    /// Throws `CactusError.streamActive` while a live stream is open.
+    public func embed(_ pcm: [Float]) async throws -> [Float] {
+        try Task.checkCancellation()
+        guard !pcm.isEmpty else { throw CactusError.invalidInput("audio embedding requires samples") }
+        try AudioOptions().validate(pcm)
+        return try await runtime.embed(session, pcm: pcm)
+    }
+
     /// Raw audio inference. Validate the response before acting on any returned tool calls.
     public func complete(
         _ pcm: [Float],

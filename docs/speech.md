@@ -68,6 +68,22 @@ execute handlers. Call `validate()` before acting on calls, and never execute
 request; stateful agents retain context for manual tool-result continuations
 through `agent.complete`.
 
+## Speech features
+
+`embed` returns the Whistle encoder output for up to 30 seconds of PCM, for
+speaker or sound similarity, clustering or a downstream classifier:
+
+```swift
+let features = try await speech.embed(pcm)
+```
+
+The result is flattened rows of 512 floats for the published model, so
+`features.count / 512` is the row count. There is about one row per 80 ms of
+audio (1280 samples); a trailing partial frame adds a row only once it holds a
+full 10 ms hop (160 samples), and any nonempty clip returns at least one row.
+Longer clips throw `CactusError.nativeFailure`; split them first. Empty audio
+is rejected, and an open stream throws `CactusError.streamActive`.
+
 ## Runtime and custom weights
 
 Whistle shares one serialized Cactus engine runtime and library path with the

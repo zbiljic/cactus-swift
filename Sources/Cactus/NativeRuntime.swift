@@ -3,7 +3,7 @@ import Foundation
 /// One actor per generation serializes its global C engine; independent
 /// same-generation engines need separate processes.
 actor NativeRuntime {
-    /// Caps text vectors at 4 MiB; raise it if a future model needs wider features.
+    /// Caps embeddings at 4 MiB; raise it if a future model needs wider features.
     static let maxEmbeddingFloats = 1 << 20
 
     private static let needle2 = NativeRuntime()
@@ -115,18 +115,18 @@ actor NativeRuntime {
         let api = try bind(session)
         // Only the Needle 2 engine lacks these, and its runtime never serves Needle 3.
         guard let embed = api.cactus?.embed else { throw Self.cactusRequired }
-        let size = embed(text, UnsafeMutableBufferPointer(start: nil, count: 0))
-        guard size >= 0 else { throw api.failure("embed size", code: size) }
-        guard
-            size > 0,
-            size <= Self.maxEmbeddingFloats else { throw CactusError.native("invalid embedding size \(size)") }
+        return try api.embedding("embed", noun: "embedding") { embed(text, $0) }
+    }
+
+    /// Speech encoder output for PCM; the engine accepts up to 30 seconds.
+    func embed(_ session: SpeechSession, pcm: [Float]) throws -> [Float] {
         try Task.checkCancellation()
-        var output = [Float](repeating: 0, count: Int(size))
-        let code = output.withUnsafeMutableBufferPointer { embed(text, $0) }
-        try Task.checkCancellation()
-        guard code >= 0 else { throw api.failure("embed", code: code) }
-        guard code == size else { throw CactusError.native("embedding length \(code), want \(size)") }
-        return output
+        guard openStream == nil else { throw CactusError.streamActive }
+        let (api, cactus) = try bindSpeech(session)
+        let embed = cactus.embedAudio
+        return try pcm.withUnsafeBufferPointer { pcm in
+            try api.embedding("embed audio", noun: "audio embedding") { embed(pcm, $0) }
+        }
     }
 
     func initializeSpeech(_ session: SpeechSession, library: URL) throws {

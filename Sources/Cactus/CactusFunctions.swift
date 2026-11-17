@@ -13,6 +13,8 @@ struct CactusFunctions: Sendable {
     static let visionModel: Int32 = 4
 
     var embed: @Sendable (String, UnsafeMutableBufferPointer<Float>) -> Int32
+    /// Speech encoder output for PCM.
+    var embedAudio: @Sendable (UnsafeBufferPointer<Float>, UnsafeMutableBufferPointer<Float>) -> Int32
     var transcribe: @Sendable (UnsafeBufferPointer<Float>, AudioOptions, UnsafeMutableBufferPointer<CChar>) -> Int32
     var setAudio: @Sendable (AudioOptions) -> Void
     /// Sets the CPU thread count for weights loaded later; zero is automatic.
@@ -39,6 +41,9 @@ extension CactusFunctions {
         self.init(
             embed: { text, output in
                 text.withCString { embed($0, nil, 0, output.baseAddress, Int32(output.count)) }
+            },
+            embedAudio: { pcm, output in
+                embed(nil, pcm.baseAddress, Int32(pcm.count), output.baseAddress, Int32(output.count))
             },
             transcribe: { pcm, options, output in
                 options.withCStringOptions {
@@ -77,5 +82,25 @@ extension CactusFunctions {
             },
             models: { models() }
         )
+    }
+}
+
+extension NativeAPI {
+    /// Queries the size of an embedding, then fills it. `noun` names it in errors.
+    func embedding(
+        _ operation: String, noun: String, _ call: (UnsafeMutableBufferPointer<Float>) -> Int32
+    ) throws -> [Float] {
+        let size = call(UnsafeMutableBufferPointer(start: nil, count: 0))
+        guard size >= 0 else { throw failure("\(operation) size", code: size) }
+        guard size > 0, size <= NativeRuntime.maxEmbeddingFloats else {
+            throw CactusError.native("invalid \(noun) size \(size)")
+        }
+        try Task.checkCancellation()
+        var output = [Float](repeating: 0, count: Int(size))
+        let code = output.withUnsafeMutableBufferPointer { call($0) }
+        try Task.checkCancellation()
+        guard code >= 0 else { throw failure(operation, code: code) }
+        guard code == size else { throw CactusError.native("\(noun) length \(code), want \(size)") }
+        return output
     }
 }

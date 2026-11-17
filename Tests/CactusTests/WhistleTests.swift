@@ -272,7 +272,14 @@ func speechCABIArguments() throws {
             #expect(language == nil && keywords == nil)
         }
     }
+    let embed: NativeAPI.Embed = { text, pcm, count, output, capacity in
+        guard text == nil, let pcm, pcm[0] == 0.25, count == 2 else { return -1 }
+        guard let output else { return capacity == 0 ? 3 : -1 }
+        output[0] = 1.5
+        return capacity == 3 ? 3 : -1
+    }
     var symbols = nativeSymbols(generation: 3)
+    symbols["cactus_embed"] = address(embed)
     symbols["cactus_transcribe"] = address(transcribe)
     symbols["cactus_set_audio"] = address(setAudio)
     symbols["cactus_complete"] = address(complete)
@@ -289,11 +296,90 @@ func speechCABIArguments() throws {
         #expect(buffer[0] == 67)
         #expect(buffer.withUnsafeMutableBufferPointer { api.streamStop($0) } == 0)
         #expect(buffer[0] == 68)
+        #expect(api.embedAudio(pcm, UnsafeMutableBufferPointer(start: nil, count: 0)) == 3)
+        var features = [Float](repeating: 0, count: 3)
+        #expect(features.withUnsafeMutableBufferPointer { api.embedAudio(pcm, $0) } == 3)
+        #expect(features[0] == 1.5)
     }
     api.setAudio(AudioOptions())
 }
 
+@Test
+func speechEmbedValidatesAndReportsEngineErrors() async throws {
+    let directory = try speechDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let config = WhistleConfiguration(
+        weightsPath: directory.appendingPathComponent("speech.cact").path, libraryPath: "/test/libneedle.dylib"
+    )
+    let probe = SpeechProbe()
+    func whistle(
+        _ embed: @escaping @Sendable (UnsafeBufferPointer<Float>, UnsafeMutableBufferPointer<Float>) -> Int32
+    ) async throws -> Whistle {
+        var api = probe.api
+        api.cactus?.embedAudio = embed
+        api.lastError = { "embedding audio limit is 30 s" }
+        return try await Whistle(configuration: config, runtime: NativeRuntime(api: api))
+    }
+    let speech = try await whistle { pcm, output in
+        #expect(Array(pcm) == [0.5, -0.25])
+        guard let base = output.baseAddress else { return 3 }
+        base.update(from: [1, 2, 3], count: 3)
+        return 3
+    }
+    _ = try await Agent(
+        configuration: Configuration(
+            weightsPath: directory.appendingPathComponent("text.cact").path, libraryPath: "/test/libneedle.dylib"
+        ), runtime: speech.runtime
+    )
+    #expect(try await speech.embed([0.5, -0.25]) == [1, 2, 3])
+    // Embedding neither rebinds nor resets the text conversation.
+    #expect(probe.text.snapshot.systems.count == 1 && probe.text.snapshot.resets == 0)
+    for pcm: [Float] in [[], [2], [.nan]] {
+        await #expect(throws: CactusError.self) { try await speech.embed(pcm) }
+    }
+    let failing = try await whistle { _, _ in -1 }
+    await #expect { try await failing.embed([0.5]) } throws: { error in
+        guard case let .nativeFailure(operation, _, detail) = error as? CactusError else { return false }
+        return operation == "embed audio size" && detail == "embedding audio limit is 30 s"
+    }
+    let short = try await whistle { _, output in output.baseAddress == nil ? 3 : 2 }
+    await #expect { try await short.embed([0.5]) } throws: { error in
+        error.localizedDescription.contains("audio embedding length 2, want 3")
+    }
+    let cancelled = Task {
+        withUnsafeCurrentTask { $0?.cancel() }
+        return try await speech.embed([0.5, -0.25])
+    }
+    await #expect(throws: CancellationError.self) { try await cancelled.value }
+    let live = try speech.stream()
+    _ = try await live.process([0.5])
+    await #expect { try await speech.embed([0.5, -0.25]) } throws: { error in
+        error.localizedDescription == CactusError.streamActive.localizedDescription
+    }
+    _ = try await live.stop()
+    await speech.close()
+    await #expect { try await speech.embed([0.5, -0.25]) } throws: { error in
+        error.localizedDescription == CactusError.closed.localizedDescription
+    }
+}
+
 extension NativeIntegrationTests {
+    @Test
+    func nativeWhistleEmbed() async throws {
+        let speech = try await Whistle()
+        // 512-float encoder rows, about one per 80 ms; a partial frame counts
+        // once it holds a full 10 ms hop.
+        let rows = [1: 1, 1280: 1, 1439: 1, 1440: 2, Whistle.sampleRate: 13, 30 * Whistle.sampleRate: 375]
+        for (samples, count) in rows {
+            let features = try await speech.embed([Float](repeating: 0, count: samples))
+            #expect(features.count == count * 512, "\(samples) samples")
+        }
+        await #expect { try await speech.embed([Float](repeating: 0, count: 31 * Whistle.sampleRate)) } throws: {
+            guard case .nativeFailure = $0 as? CactusError else { return false }
+            return true
+        }
+    }
+
     @Test
     func nativeWhistleSilenceAndWeightKinds() async throws {
         let speech = try await Whistle()

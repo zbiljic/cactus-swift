@@ -10,6 +10,7 @@ extension CactusFunctions {
     /// Fails every call; tests replace the functions they exercise.
     static let unused = Self(
         embed: { _, _ in -1 },
+        embedAudio: { _, _ in -1 },
         transcribe: { _, _, _ in -1 },
         setAudio: { _ in },
         setThreads: { _ in },
