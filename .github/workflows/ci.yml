@@ -14,7 +14,7 @@ concurrency:
 
 jobs:
   validate:
-    runs-on: ${{ vars.RUNNER_MACOS || 'macos-26' }}
+    runs-on: ${{ vars.RUNNER_MACOS || 'xcode-27' }}
     timeout-minutes: 20
     steps:
       - name: Checkout
