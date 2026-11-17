@@ -27,9 +27,15 @@ actor NativeRuntime {
     private var openStream: StreamSession?
     /// Streams ended by `closeSpeech` that have not yet observed the stop.
     private var endedStreams: Set<UUID> = []
+    /// The CPU thread count for the Cactus engine; zero is automatic.
+    private(set) var threads: Int32 = 0
 
-    init(api: NativeAPI? = nil) {
+    /// Opens a library for a generation; tests substitute a fake engine.
+    private let open: @Sendable (String, Int) throws -> NativeAPI
+
+    init(api: NativeAPI? = nil, open: @escaping @Sendable (String, Int) throws -> NativeAPI = NativeAPI.open) {
         self.api = api
+        self.open = open
     }
 
     func initialize(_ session: Session, library: URL) throws {
@@ -44,9 +50,17 @@ actor NativeRuntime {
             throw CactusError.native("engine already loaded from \(libraryPath)")
         }
         if api == nil {
-            api = try NativeAPI.open(path, generation: generation)
+            let opened = try open(path, generation)
+            opened.cactus?.setThreads(threads)
+            api = opened
         }
         libraryPath = path
+    }
+
+    /// Stores the count for an engine loaded later and applies it to a loaded one.
+    func setThreads(_ count: Int32) {
+        threads = count
+        api?.cactus?.setThreads(count)
     }
 
     func complete(_ session: Session, text: String, tokens: Int32, reset: Bool = false) throws -> Response {

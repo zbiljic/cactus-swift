@@ -54,13 +54,13 @@ struct EngineRelease: Sendable {
         libraries: [
             .darwinARM64: cactusWheel(
                 "macosx_11_0_arm64",
-                size: 720_571,
-                checksum: "782a43480285bf36e7dda947f50496dc597dceb26a8f8f9406d89fbe7ce96a1c"
+                size: 722_805,
+                checksum: "16ce3c02e87db1ef3ab3974d5d31ff0680bb1004cd49b3606d5cfe4db8b9b536"
             ),
             .darwinAMD64: cactusWheel(
                 "macosx_11_0_x86_64",
-                size: 780_485,
-                checksum: "ba674f62f53d91328d0b925ba9c179c15f6fef04865b334ac9c505d83d5932da"
+                size: 781_063,
+                checksum: "a1c382375b6df5f1f57f075e48c5fcd9da84b666a2c97bd4b49c10543b8b905f"
             ),
         ],
         weights: EngineArtifact(
@@ -121,13 +121,13 @@ struct EngineRelease: Sendable {
         )
     }
 
-    /// Sizes and checksums come from releases/4.0.0/manifest.json (sha256
-    /// b6a39fb21bc77780c029c45d4cc206b60f883146fa2dbc28bfcc9995fe72b871).
+    /// Sizes and checksums come from releases/4.1.1/manifest.json (sha256
+    /// 27168631232dbff52a205b54bbfad54fd9b81f06fa368657d07449e2221f5e25).
     private static func cactusWheel(_ tag: String, size: Int, checksum: String) -> EngineArtifact {
         EngineArtifact(
             name: "libcactus.dylib",
             repository: "Cactus-Compute/cactus",
-            revision: "1a028f5a3972b67dd8d8752f882113d475e7ec4c",
+            revision: "d2c5cd70432ed78345f3ba6b620bff2feeec6c86",
             path: "releases/\(Engine.version)/python/cactus_runtime-\(Engine.version)-py3-none-\(tag).whl",
             size: size,
             checksum: checksum,

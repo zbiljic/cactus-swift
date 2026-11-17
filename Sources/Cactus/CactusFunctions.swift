@@ -15,6 +15,8 @@ struct CactusFunctions: Sendable {
     var embed: @Sendable (String, UnsafeMutableBufferPointer<Float>) -> Int32
     var transcribe: @Sendable (UnsafeBufferPointer<Float>, AudioOptions, UnsafeMutableBufferPointer<CChar>) -> Int32
     var setAudio: @Sendable (AudioOptions) -> Void
+    /// Sets the CPU thread count for weights loaded later; zero is automatic.
+    var setThreads: @Sendable (Int32) -> Void
     var completeAudio: @Sendable (UnsafeBufferPointer<Float>, Int32, UnsafeMutableBufferPointer<CChar>) -> Int32
     var streamProcess: StreamProcessCall
     var streamStop: @Sendable (UnsafeMutableBufferPointer<CChar>) -> Int32
@@ -29,6 +31,7 @@ extension CactusFunctions {
         let complete = try function("complete", as: NativeAPI.CompleteWithAudio.self)
         let transcribe = try function("transcribe", as: NativeAPI.Transcribe.self)
         let setAudio = try function("set_audio", as: NativeAPI.SetAudio.self)
+        let setThreads = try function("set_threads", as: NativeAPI.SetThreads.self)
         let streamProcess = try function("stream_transcribe_process", as: NativeAPI.StreamProcess.self)
         let streamStop = try function("stream_transcribe_stop", as: NativeAPI.StreamStop.self)
         let describe = try function("describe", as: NativeAPI.Describe.self)
@@ -43,6 +46,7 @@ extension CactusFunctions {
                 }
             },
             setAudio: { options in options.withCStringOptions { setAudio($0, $1, $2) } },
+            setThreads: { setThreads($0) },
             completeAudio: { pcm, tokens, output in
                 complete(nil, pcm.baseAddress, Int32(pcm.count), tokens, output.baseAddress, Int32(output.count))
             },

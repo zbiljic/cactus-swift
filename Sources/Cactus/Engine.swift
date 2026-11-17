@@ -5,7 +5,7 @@ import Foundation
 public enum Engine {
     /// The Cactus engine version, which runs Needle 3 (the default generation),
     /// Whistle and Mirage. Needle 2 keeps its own engine; see `version(for:)`.
-    public static let version = "4.0.0"
+    public static let version = "4.1.1"
     static let maximumArtifactSize = 64 * 1024 * 1024
 
     public enum Platform: String, CaseIterable, Sendable {
@@ -51,6 +51,23 @@ public enum Engine {
         )
         _ = try await fetchWeights(of: release, platform: platform, cacheDirectory: cacheDirectory, session: session)
         return library
+    }
+
+    /// Sets the number of CPU threads the Cactus engine uses for Needle 3, Whistle
+    /// and Mirage weights loaded after the call, or zero for the engine's automatic
+    /// count. The engine reads the count when it loads weights, and loaded weights
+    /// keep the count they were loaded with, so call it before creating the first
+    /// `Agent`, `Whistle` or `Mirage`. The setting is process-wide and holds for an
+    /// engine loaded later. The Needle 2 engine ignores it.
+    public static func setThreads(_ threads: Int) async throws {
+        try await setThreads(threads, runtime: .shared(for: 3))
+    }
+
+    static func setThreads(_ threads: Int, runtime: NativeRuntime) async throws {
+        guard let count = Int32(exactly: threads), count >= 0 else {
+            throw CactusError.invalidInput("threads must be zero or a positive count, got \(threads)")
+        }
+        await runtime.setThreads(count)
     }
 
     public static func version(for generation: Int) throws -> String {

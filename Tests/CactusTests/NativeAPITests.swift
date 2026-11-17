@@ -12,6 +12,7 @@ extension CactusFunctions {
         embed: { _, _ in -1 },
         transcribe: { _, _, _ in -1 },
         setAudio: { _ in },
+        setThreads: { _ in },
         completeAudio: { _, _, _ in -1 },
         streamProcess: { _, _, _ in -1 },
         streamStop: { _ in -1 },
@@ -19,6 +20,22 @@ extension CactusFunctions {
         models: { 0 }
     )
 }
+
+/// Records cactus_set_threads calls, which a C function pointer cannot capture.
+final class ThreadCalls: @unchecked Sendable {
+    private let lock = NSLock()
+    private var calls: [Int32] = []
+
+    var values: [Int32] {
+        lock.withLock { calls }
+    }
+
+    func append(_ count: Int32) {
+        lock.withLock { calls.append(count) }
+    }
+}
+
+let threadCalls = ThreadCalls()
 
 /// The live transcription pair, checking the six-argument process ABI.
 private func streamSymbols() -> [String: UnsafeMutableRawPointer] {
@@ -86,6 +103,8 @@ func nativeSymbols(generation: Int) -> [String: UnsafeMutableRawPointer] {
     for name in ["cactus_transcribe", "cactus_set_audio"] {
         symbols[name] = address(reset) // Required, but not called here.
     }
+    let setThreads: NativeAPI.SetThreads = { threadCalls.append($0) }
+    symbols["cactus_set_threads"] = address(setThreads)
     symbols.merge(streamSymbols()) { _, new in new }
     return symbols
 }
@@ -100,7 +119,12 @@ func nativeCompletionABI(generation: Int) throws {
     #expect(api.failure("test", code: -2, fallback: "buffer").localizedDescription
         == "cactus: test failed with code -2: \(generation == 3 ? "native detail" : "buffer")")
     if generation == 3 {
-        let embed = try #require(api.cactus?.embed)
+        let cactus = try #require(api.cactus)
+        let before = threadCalls.values.count
+        cactus.setThreads(3)
+        cactus.setThreads(0)
+        #expect(threadCalls.values.dropFirst(before).starts(with: [3, 0]))
+        let embed = cactus.embed
         #expect(embed("hello", UnsafeMutableBufferPointer(start: nil, count: 0)) == 2)
         var vector = [Float](repeating: 0, count: 2)
         #expect(vector.withUnsafeMutableBufferPointer { embed("hello", $0) } == 2)
@@ -144,5 +168,58 @@ func nativeDiagnosticFallbacks() {
         #expect(api.failure("load", code: -1).localizedDescription == "cactus: load failed with code -1")
         #expect(api.failure("complete", code: -1, fallback: " buffer \n").localizedDescription
             == "cactus: complete failed with code -1: buffer")
+    }
+}
+
+@Test
+func setThreadsValidatesStoresAndApplies() async throws {
+    // Before the engine loads, the count is kept for the load.
+    let unloaded = NativeRuntime()
+    try await Engine.setThreads(4, runtime: unloaded)
+    #expect(await unloaded.threads == 4)
+
+    let calls = ThreadCalls()
+    var api = FakeNative().api
+    var cactus = CactusFunctions.unused
+    cactus.setThreads = { calls.append($0) }
+    api.cactus = cactus
+    let runtime = NativeRuntime(api: api)
+    try await Engine.setThreads(2, runtime: runtime)
+    try await Engine.setThreads(0, runtime: runtime)
+    for bad in [-1, Int(Int32.max) + 1] {
+        await #expect { try await Engine.setThreads(bad, runtime: runtime) } throws: { error in
+            error.localizedDescription.contains("threads")
+        }
+    }
+    #expect(calls.values == [2, 0])
+    #expect(await runtime.threads == 0)
+
+    // A count set before the engine loads is applied when it opens.
+    let fake = api
+    let opened = NativeRuntime { _, _ in fake }
+    try await Engine.setThreads(3, runtime: opened)
+    try await opened.initialize(Session(Configuration()), library: URL(fileURLWithPath: "/test/libcactus.dylib"))
+    #expect(calls.values == [2, 0, 3])
+}
+
+extension NativeIntegrationTests {
+    @Test
+    func nativeThreads() async throws {
+        // Weights keep the thread count they were loaded with, so load a copy of
+        // the speech weights rather than the text weights other tests share.
+        let path = try await Engine.fetchSpeechWeights(cacheDirectory: nil)
+        let copy = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).cact")
+        try FileManager.default.copyItem(at: path, to: copy)
+        defer { try? FileManager.default.removeItem(at: copy) }
+        try await Engine.setThreads(1)
+        let speech: Whistle
+        do {
+            speech = try await Whistle(configuration: WhistleConfiguration(weightsPath: copy.path))
+            try await Engine.setThreads(0)
+        } catch {
+            try await Engine.setThreads(0)
+            throw error
+        }
+        #expect(try await speech.transcribe([Float](repeating: 0, count: Whistle.sampleRate)).text.isEmpty)
     }
 }

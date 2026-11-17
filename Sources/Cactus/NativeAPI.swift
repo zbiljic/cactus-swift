@@ -20,6 +20,7 @@ struct NativeAPI: Sendable {
     ) -> Int32
     typealias StreamStop = @convention(c) (UnsafeMutablePointer<CChar>?, Int32) -> Int32
     typealias SetAudio = @convention(c) (UnsafePointer<CChar>?, UnsafePointer<CChar>?, Int32) -> Void
+    typealias SetThreads = @convention(c) (Int32) -> Void
     typealias Reset = @convention(c) () -> Void
     typealias Load = @convention(c) (UnsafeRawPointer?, UInt64) -> Int32
     typealias LastError = @convention(c) () -> UnsafePointer<CChar>?
@@ -47,7 +48,7 @@ struct NativeAPI: Sendable {
 
     /// The cactus_* ABI that the Cactus engine exports in full.
     static let cactusSymbols = [
-        "load", "models", "last_error", "init", "complete", "set_audio", "reset",
+        "load", "models", "last_error", "init", "complete", "set_audio", "set_threads", "reset",
         "embed", "transcribe", "stream_transcribe_process", "stream_transcribe_stop", "describe",
     ]
 

@@ -147,6 +147,20 @@ queries.
 other agents. `Whistle` and `Mirage` have the same `close`; a Whistle's also
 ends its open stream.
 
+## Threads
+
+The Cactus engine picks a CPU thread count automatically. `Engine.setThreads`
+sets a process-wide count for the Needle 3, Whistle and Mirage weights loaded
+after the call; zero restores the automatic count. The engine reads it when it
+loads weights, and loaded weights keep the count they were loaded with, so call
+it before creating the first `Agent`, `Whistle` or `Mirage`:
+
+```swift
+try await Engine.setThreads(2)
+```
+
+The Needle 2 engine ignores it.
+
 ## Text embeddings
 
 Needle 3 exposes text features as `[Float]`:
@@ -224,7 +238,7 @@ requires a separate process. Needle 3 can reload its base archive.
 ## Engine downloads and caching
 
 By default, the library downloads and caches the pinned
-[Cactus engine](https://huggingface.co/Cactus-Compute/cactus) (4.0.0) and the
+[Cactus engine](https://huggingface.co/Cactus-Compute/cactus) (4.1.1) and the
 `needle3.cact` base weights (~35 MB) from the
 [Needle 3 model repository](https://huggingface.co/Cactus-Compute/needle3).
 Subsequent runs use the cached files.
@@ -240,7 +254,7 @@ The library selects an engine matching the resolved generation in this order:
 1. `Configuration.libraryPath`.
 2. `CACTUS_LIB_PATH` for Needle 3, or `NEEDLE2_LIB_PATH`, then
    `NEEDLE_LIB_PATH`, for Needle 2. `Engine.libraryPathVariables(for:)` lists them.
-3. A size- and checksum-verified download of the pinned Cactus engine (4.0.0)
+3. A size- and checksum-verified download of the pinned Cactus engine (4.1.1)
    or Needle 2 engine (2.0.4).
 
 A Needle 3 library override still fetches missing base weights unless

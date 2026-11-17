@@ -159,7 +159,7 @@ func downloadsAndVerifiesBaseWeightsAndIsolatesGenerationCaches() async throws {
             ? ("Cactus-Compute/needle2", "python/cactus_needle-2.0.4-py3-none-", "needle/libneedle.dylib")
             : (
                 "Cactus-Compute/cactus",
-                "releases/4.0.0/python/cactus_runtime-4.0.0-py3-none-",
+                "releases/4.1.1/python/cactus_runtime-4.1.1-py3-none-",
                 "cactus/libcactus.dylib"
             )
         for platform in Engine.Platform.allCases {
@@ -172,7 +172,7 @@ func downloadsAndVerifiesBaseWeightsAndIsolatesGenerationCaches() async throws {
         }
     }
     #expect(try EngineRelease(3).libraryName == "libcactus.dylib")
-    #expect(try Engine.version(for: 0) == "4.0.0")
+    #expect(try Engine.version(for: 0) == "4.1.1")
     #expect(try Engine.version(for: 2) == "2.0.4")
     for release in [EngineRelease.needle3, .whistle, .mirage] {
         let weights = try #require(release.weights)
