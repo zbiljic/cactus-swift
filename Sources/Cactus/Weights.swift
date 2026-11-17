@@ -261,3 +261,16 @@ private extension Data {
         withUnsafeBytes { T(littleEndian: $0.loadUnaligned(fromByteOffset: offset, as: T.self)) }
     }
 }
+
+extension NativeRuntime {
+    /// The model generation of a .cact header tag.
+    static func weightsGeneration(_ data: Data) throws -> Int {
+        guard data.count >= 4 else { throw CactusError.invalidInput("weights header is truncated") }
+        let tag = data.prefix(4).enumerated().reduce(UInt32(0)) { $0 | UInt32($1.element) << ($1.offset * 8) }
+        switch tag {
+        case Cact.needle2Tag: return 2
+        case Cact.needle3Tag: return 3
+        default: throw CactusError.invalidInput("unknown weights header 0x\(String(tag, radix: 16))")
+        }
+    }
+}
