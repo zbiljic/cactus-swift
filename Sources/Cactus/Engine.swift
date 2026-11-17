@@ -49,7 +49,7 @@ public enum Engine {
             cacheDirectory: cacheDirectory,
             session: session
         )
-        _ = try await fetchWeights(of: release, platform: platform, cacheDirectory: cacheDirectory, session: session)
+        _ = try await fetchWeights(of: release, cacheDirectory: cacheDirectory, session: session)
         return library
     }
 
@@ -115,18 +115,12 @@ public enum Engine {
             cacheDirectory: cacheDirectory,
             session: session
         )
-        _ = try await fetchSpeechWeights(platform: platform, cacheDirectory: cacheDirectory, session: session)
+        _ = try await fetchSpeechWeights(cacheDirectory: cacheDirectory, session: session)
         return library
     }
 
-    static func fetchSpeechWeights(
-        platform: Platform = .current, cacheDirectory: URL?, session: URLSession = .shared
-    ) async throws -> URL {
-        try await EngineDownloads.shared.fetch(
-            artifact: EngineRelease.speechWeights,
-            directory: directory(release: .whistle, platform: platform, override: cacheDirectory),
-            session: session
-        )
+    static func fetchSpeechWeights(cacheDirectory: URL?, session: URLSession = .shared) async throws -> URL {
+        try await fetch(weights: EngineRelease.speechWeights, cacheDirectory: cacheDirectory, session: session)
     }
 
     /// Prepares the engine and vision weights for offline use, without fetching text or speech weights.
@@ -139,18 +133,12 @@ public enum Engine {
             cacheDirectory: cacheDirectory,
             session: session
         )
-        _ = try await fetchVisionWeights(platform: platform, cacheDirectory: cacheDirectory, session: session)
+        _ = try await fetchVisionWeights(cacheDirectory: cacheDirectory, session: session)
         return library
     }
 
-    static func fetchVisionWeights(
-        platform: Platform = .current, cacheDirectory: URL?, session: URLSession = .shared
-    ) async throws -> URL {
-        try await EngineDownloads.shared.fetch(
-            artifact: EngineRelease.visionWeights,
-            directory: directory(release: .mirage, platform: platform, override: cacheDirectory),
-            session: session
-        )
+    static func fetchVisionWeights(cacheDirectory: URL?, session: URLSession = .shared) async throws -> URL {
+        try await fetch(weights: EngineRelease.visionWeights, cacheDirectory: cacheDirectory, session: session)
     }
 
     static func fetchLibrary(
@@ -165,23 +153,39 @@ public enum Engine {
 
     /// Fetches the weights archive of a release, or returns nil when its engine embeds the model.
     static func fetchWeights(
-        of release: EngineRelease, platform: Platform = .current, cacheDirectory: URL?, session: URLSession = .shared
+        of release: EngineRelease, cacheDirectory: URL?, session: URLSession = .shared
     ) async throws -> URL? {
         guard let weights = release.weights else { return nil }
-        return try await EngineDownloads.shared.fetch(
+        return try await fetch(weights: weights, cacheDirectory: cacheDirectory, session: session)
+    }
+
+    private static func fetch(weights: EngineArtifact, cacheDirectory: URL?, session: URLSession) async throws -> URL {
+        try await EngineDownloads.shared.fetch(
             artifact: weights,
-            directory: directory(release: release, platform: platform, override: cacheDirectory),
+            directory: weightsDirectory(weights, override: cacheDirectory),
             session: session
         )
     }
 
     static func directory(release: EngineRelease, platform: Platform, override: URL?) throws -> URL {
-        if let override {
-            guard override.isFileURL else { throw CactusError.invalidInput("cache directory must be a file URL") }
-            return override.standardizedFileURL
-        }
-        return FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".cache/cactus-swift/\(release.version)/\(platform.rawValue)", isDirectory: true)
+        try override.map(customDirectory) ?? cacheRoot
+            .appendingPathComponent("\(release.version)/\(platform.rawValue)", isDirectory: true)
+    }
+
+    /// Keys model weights by checksum rather than engine version, so an engine
+    /// upgrade reuses unchanged weights.
+    static func weightsDirectory(_ weights: EngineArtifact, override: URL?) throws -> URL {
+        try override.map(customDirectory) ?? cacheRoot
+            .appendingPathComponent("models/\(weights.checksum.prefix(16))", isDirectory: true)
+    }
+
+    private static var cacheRoot: URL {
+        FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".cache/cactus-swift", isDirectory: true)
+    }
+
+    private static func customDirectory(_ override: URL) throws -> URL {
+        guard override.isFileURL else { throw CactusError.invalidInput("cache directory must be a file URL") }
+        return override.standardizedFileURL
     }
 
     static func digest(_ data: Data) -> String {

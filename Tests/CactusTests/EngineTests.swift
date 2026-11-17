@@ -191,6 +191,24 @@ func downloadsAndVerifiesBaseWeightsAndIsolatesGenerationCaches() async throws {
 }
 
 @Test
+func defaultWeightsCacheIsSharedAcrossEngineVersions() throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    // Default weights are keyed by checksum and shared by every engine version.
+    for weights in try [
+        #require(EngineRelease.needle3.weights),
+        EngineRelease.speechWeights,
+        EngineRelease.visionWeights,
+    ] {
+        #expect(try Engine.weightsDirectory(weights, override: nil).path
+            .hasSuffix("/.cache/cactus-swift/models/\(weights.checksum.prefix(16))"))
+        #expect(try Engine.weightsDirectory(weights, override: directory) == directory.standardizedFileURL)
+    }
+    #expect(throws: CactusError.self) {
+        try Engine.weightsDirectory(EngineRelease.speechWeights, override: URL(string: "https://example.com"))
+    }
+}
+
+@Test
 func whistleFetchUsesVerifiedCacheWithoutTextWeights() async throws {
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)

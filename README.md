@@ -265,10 +265,12 @@ Needle 2 engine and `cactus_*` from the Cactus engine. A library missing any
 function of that ABI throws `CactusError.unsupportedABI` before inference.
 Cactus engine failures include native details, such as context limits.
 
-Default caches are `~/.cache/cactus-swift/<engine-version>/<platform>/`. A custom
-`cacheDirectory` is the exact destination directory. Needle 2 uses
-`libneedle.dylib` and the Cactus engine uses `libcactus.dylib`, so both can
-share a custom directory for one platform.
+By default, engines are cached under
+`~/.cache/cactus-swift/<engine-version>/<platform>/` and model weights under
+`~/.cache/cactus-swift/models/<checksum-prefix>/`, so an engine upgrade reuses
+unchanged weights. A custom `cacheDirectory` is the exact destination directory
+for both. Needle 2 uses `libneedle.dylib` and the Cactus engine uses
+`libcactus.dylib`, so both can share a custom directory for one platform.
 
 For offline use, call `Engine.fetch` for the target platform and generation,
 preserve the downloaded files and `.sha256` markers, and use the same cache

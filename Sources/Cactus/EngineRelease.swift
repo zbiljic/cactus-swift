@@ -73,7 +73,7 @@ struct EngineRelease: Sendable {
         )
     )
 
-    /// Speech weights run on the Cactus engine and share its cache directory.
+    /// Speech weights run on the Cactus engine.
     static let speechWeights = EngineArtifact(
         name: "whistle.cact",
         repository: "Cactus-Compute/whistle",
@@ -91,7 +91,7 @@ struct EngineRelease: Sendable {
         weights: speechWeights
     )
 
-    /// Vision weights run on the Cactus engine and share its cache directory.
+    /// Vision weights also run on the Cactus engine.
     static let visionWeights = EngineArtifact(
         name: "mirage.cact",
         repository: "Cactus-Compute/mirage",
